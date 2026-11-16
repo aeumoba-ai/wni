@@ -8,7 +8,7 @@ Game monopoli online 3D dengan sentuhan lokal Indonesia yang dirancang **100% Gu
 - **Satu Tombol PENGATURAN (Terpadu)**: Tombol **PENGATURAN** yang jelas tersedia di **Menu Utama**, **Ruang Tunggu**, dan **HUD**. Semua pengaturan ada di dalam satu modal yang sama — tab `AUDIO` (volume 0–100% untuk master/musik/klik/SFX), tab `ANIMASI` (Smooth Animation ON/OFF + cutscene, default OFF), tab `RUANGAN` (kode/link invite, keamanan), serta **Cara Main**. Tidak ada tombol pengaturan yang terpisah-pisah.
 - **Mode Sinematik Sementara & Kamera Follow**: Saat pion bergerak atau cutscene berjalan, HUD/kartu/laci yang menutupi papan meredup sementara dan aktif kembali setelah animasi selesai. Kamera mengikuti pion dengan lembut lalu kembali ke sudut, zoom, dan target yang dipakai pemain sebelumnya — tanpa reset; jika pemain menyentuh kamera, kontrol langsung kembali ke pemain.
 - **Mobile / Touch Responsive**: Area aman notch (*safe-area*), viewport dinamis, layout HUD adaptif, daftar pemain bisa digeser horizontal, tombol sentuh besar, input nyaman tanpa auto-zoom iOS, kontrol kamera drag + pinch-to-zoom, serta kamera/FOV/DPR yang menyesuaikan layar portrait dan landscape.
-- **Kualitas Grafik + Advanced Option**: Tab `GRAFIK` di dalam satu Pengaturan menyediakan preset `RINGAN`, `SEIMBANG` (default), `TINGGI`, dan `KUSTOM`. Preset tinggi menambah resolusi render, bayangan lembut, tinggi ruko/gedung/menara, kaca fasad, lis atap, detail dekorasi dan kepadatan partikel saat Smooth Animation aktif. Opsi lanjutan kustom: resolusi, bayangan, kepadatan efek, tinggi bangunan, dan detail ornamen; tersimpan lokal per perangkat (tidak memengaruhi fairness/multiplayer) dengan batas aman otomatis untuk mobile.
+- **Kualitas Grafik + Advanced Option + Gaya Pixel**: Tab `GRAFIK` di dalam satu Pengaturan menyediakan preset `RINGAN`, `SEIMBANG` (default), `TINGGI`, dan `KUSTOM`, serta switch gaya `BIASA · 3D HALUS` / `PIXEL · RETRO 8-BIT`. Pixel style merender seluruh papan/kota/pion 3D dalam buffer resolusi rendah lalu upscale nearest-neighbour, memakai material lebih faceted dan font Pixelify Sans untuk judul/HUD; gerakan pion/dadu/bangunan/partikel memakai frame bertahap agar selaras dengan estetika pixel. Preset tinggi menambah resolusi render, bayangan lembut, tinggi ruko/gedung/menara, kaca fasad, lis atap, detail dekorasi dan kepadatan partikel saat Smooth Animation aktif. Opsi kustom: resolusi, bayangan, kepadatan efek, tinggi bangunan, dan detail ornamen; tersimpan lokal per perangkat (tidak memengaruhi fairness/multiplayer) dengan batas aman otomatis untuk mobile.
 - **Multiplayer Online di Vercel (Zero-Config!)**:
   - Menggunakan arsitektur **Host-Authoritative WebRTC P2P (`PeerJS`)** berbasis **Kode Room 6 karakter** (`KNH482`) sehingga bisa langsung main lintas perangkat di Vercel Static/Hobby plan tanpa server WebSocket tambahan.
   - Dilengkapi **BroadcastChannel** untuk testing multi-tab lokal secara instan, serta **Vercel Serverless Function (`/api/rooms`)** untuk daftar ruangan publik (otomatis mendukung Upstash Redis / Vercel KV bila env var diisi, dan tetap berjalan dengan fallback memori bila tanpa konfigurasi).
@@ -45,7 +45,7 @@ Untuk development: `npm run dev` (Vite) dan `npm run dev:server` (opsional untuk
 
 ## Tipografi Tema (Self-Hosted & Web-Optimized)
 
-Font tidak lagi bergantung pada CDN pihak ketiga: seluruh berkas **WOFF2 variable** ada di `public/fonts/` dan dimuat lewat `src/fonts.css` dengan `font-display: swap` + `preload` untuk 3 font kritikal.
+Font tidak lagi bergantung pada CDN pihak ketiga: seluruh berkas **WOFF2** ada di `public/fonts/` dan dimuat lewat `src/fonts.css` dengan `font-display: swap` + `preload` untuk font kritikal.
 
 | Peran | Font | Alasan |
 | --- | --- | --- |
@@ -53,6 +53,7 @@ Font tidak lagi bergantung pada CDN pihak ketiga: seluruh berkas **WOFF2 variabl
 | Tombol, HUD, angka, badge | **Baloo 2** | Rounded, ramah, playful, tetap terbaca di ukuran kecil, dan mendukung Latin Extended. |
 | Teks UI, deskripsi, chat, log | **Plus Jakarta Sans** | Geometric sans karya **Tokotype (Jakarta)** dengan x-height tinggi & konter terbuka; nyaman untuk UI dan teks kecil. |
 | Kode room, timestamp, persentase | **JetBrains Mono** | Monospace tabular sehingga 6 karakter kode room & angka tidak bergeser. |
+| Judul/HUD saat `PIXEL · RETRO 8-BIT` | **Pixelify Sans** | Typeface pixel-inspired untuk switch gaya retro; teks paragraf tetap memakai font UI yang mudah dibaca. |
 
 Lisensi SIL Open Font License 1.1 untuk masing-masing font tersedia di `public/fonts/OFL-*.txt`. Pratinjau tipografi tanpa koneksi internet ada di [`typography-preview.html`](./typography-preview.html).
 

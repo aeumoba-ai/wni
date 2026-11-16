@@ -20,6 +20,7 @@ import {
   Building2,
   Sun,
   SlidersHorizontal,
+  Grid3X3,
 } from 'lucide-react';
 import { soundEngine } from '../game/SoundEngine.js';
 import { GRAPHICS_PRESETS, getEffectiveGraphicsSettings } from '../game/GraphicsSettings.js';
@@ -82,6 +83,7 @@ export default function SettingsModal({
   onToggleSmoothAnimation,
   onPreviewCutscene,
   graphicsSettings,
+  onSetVisualStyle,
   onSetGraphicsPreset,
   onUpdateGraphicsCustom,
   onResetGraphics,
@@ -134,7 +136,7 @@ export default function SettingsModal({
       <div
         className="kraft-card modal-card settings-modal-card"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: activeTab === 'graphics' ? 590 : 496 }}
+        style={{ maxWidth: activeTab === 'graphics' || room ? 590 : 496 }}
       >
         <div className="modal-header">
           <div>
@@ -151,7 +153,7 @@ export default function SettingsModal({
         </div>
 
         {/* Unified settings tabs: RUANGAN (in room) | AUDIO | ANIMASI | GRAFIK */}
-        <div className="tab-bar settings-tab-bar">
+        <div className={`tab-bar settings-tab-bar ${room ? 'has-room' : ''}`}>
           {room && (
             <button
               type="button"
@@ -501,6 +503,51 @@ export default function SettingsModal({
                     Atur kejernihan render 3D, bayangan, detail bangunan dan kepadatan efek. Pilihan ini hanya berlaku di perangkat Anda.
                   </div>
                 </div>
+              </div>
+
+              <div className="visual-style-section">
+                <div className="visual-style-heading">
+                  <div>
+                    <div className="smooth-features-title">GAYA VISUAL PETA &amp; KARAKTER</div>
+                    <div className="settings-desc">Bisa diganti kapan saja tanpa mengubah progres, room, atau aturan permainan.</div>
+                  </div>
+                  <span className={`visual-style-status ${graphicsSettings?.visualStyle === 'pixel' ? 'pixel' : ''}`}>
+                    {graphicsSettings?.visualStyle === 'pixel' ? 'PIXEL AKTIF' : 'BIASA AKTIF'}
+                  </span>
+                </div>
+                <div className="visual-style-grid">
+                  <button
+                    type="button"
+                    className={`visual-style-card ${graphicsSettings?.visualStyle !== 'pixel' ? 'active' : ''}`}
+                    onClick={() => onSetVisualStyle?.('standard')}
+                    aria-pressed={graphicsSettings?.visualStyle !== 'pixel'}
+                  >
+                    <span className="visual-style-art standard-art"><Monitor size={27} /><span>3D</span></span>
+                    <span className="visual-style-copy">
+                      <strong>BIASA · 3D HALUS</strong>
+                      <small>Gaya visual Monopoli Konoha saat ini, dengan model 3D dan gerakan normal/smooth mengikuti pilihan Animasi.</small>
+                    </span>
+                    <span className="visual-style-select">{graphicsSettings?.visualStyle !== 'pixel' ? 'AKTIF' : 'PILIH'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`visual-style-card pixel ${graphicsSettings?.visualStyle === 'pixel' ? 'active' : ''}`}
+                    onClick={() => onSetVisualStyle?.('pixel')}
+                    aria-pressed={graphicsSettings?.visualStyle === 'pixel'}
+                  >
+                    <span className="visual-style-art pixel-art"><Grid3X3 size={26} /><span>8-BIT</span></span>
+                    <span className="visual-style-copy">
+                      <strong>PIXEL · RETRO 8-BIT</strong>
+                      <small>Papan/kota dan pion dirender low-resolution pixelated, material lebih faceted, UI judul memakai Pixelify Sans.</small>
+                    </span>
+                    <span className="visual-style-select">{graphicsSettings?.visualStyle === 'pixel' ? 'AKTIF' : 'PILIH'}</span>
+                  </button>
+                </div>
+                {graphicsSettings?.visualStyle === 'pixel' && (
+                  <div className="pixel-animation-note">
+                    <Clapperboard size={15} /> <span><strong>Animasi Pixel aktif:</strong> langkah pion, lempar dadu, pantulan bangunan dan efek partikel memakai timing bertahap/blocky agar selaras dengan gaya retro. Jika Smooth Animation OFF, versi pixel tampil sederhana dan ringan.</span>
+                  </div>
+                )}
               </div>
 
               <div className="graphics-preset-grid">

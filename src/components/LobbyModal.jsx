@@ -15,6 +15,7 @@ import {
   Clapperboard,
   BookOpen,
   Monitor,
+  Grid3X3,
 } from 'lucide-react';
 import { CHARACTERS, RANDOM_GUEST_NAMES, getCharacterById } from '../../shared/characters.js';
 import AvatarIcon from './AvatarIcon.jsx';
@@ -33,6 +34,7 @@ export default function LobbyModal({
   smoothAnimation = false,
   audioMaster = 0,
   graphicsPreset = 'balanced',
+  visualStyle = 'standard',
   busy,
   error,
 }) {
@@ -168,6 +170,9 @@ export default function LobbyModal({
               </span>
               <span className={`main-settings-chip ${smoothAnimation ? 'on' : ''}`}>
                 <Clapperboard size={11} /> Animasi {smoothAnimation ? 'ON' : 'OFF'}
+              </span>
+              <span className={`main-settings-chip ${visualStyle === 'pixel' ? 'on' : ''}`}>
+                <Grid3X3 size={11} /> {visualStyle === 'pixel' ? 'GAYA PIXEL' : 'GAYA BIASA'}
               </span>
               <span className="main-settings-chip">
                 <Monitor size={11} /> Grafik {graphicsPreset === 'high' ? 'TINGGI' : graphicsPreset === 'low' ? 'RINGAN' : graphicsPreset === 'custom' ? 'KUSTOM' : 'SEIMBANG'}

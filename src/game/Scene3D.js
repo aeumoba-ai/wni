@@ -336,6 +336,8 @@ export class Scene3D {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.graphicsSettings = DEFAULT_GRAPHICS_SETTINGS;
     this.graphics = getEffectiveGraphicsSettings(this.graphicsSettings);
+    this.pixelStyle = false;
+    this.pixelMaterialDefaults = new WeakMap();
     this.lastGame = null;
     this.sunLight = null;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1150,13 +1152,9 @@ export class Scene3D {
     const previous = this.graphics || getEffectiveGraphicsSettings(DEFAULT_GRAPHICS_SETTINGS);
     this.graphicsSettings = next;
     this.graphics = getEffectiveGraphicsSettings(next);
-
-    const compactCap = this.isCompactViewport ? 1.35 : 1.8;
-    const pixelRatio = Math.min(
-      (window.devicePixelRatio || 1) * this.graphics.resolution,
-      compactCap
-    );
-    this.renderer.setPixelRatio(Math.max(0.65, pixelRatio));
+    this.pixelStyle = this.graphics.visualStyle === 'pixel';
+    this.applyPixelVisualStyle();
+    this.updateRenderResolution();
     this.renderer.shadowMap.enabled = Boolean(this.graphics.shadows);
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     if (this.sunLight) {
@@ -1188,8 +1186,53 @@ export class Scene3D {
         const ownerColor = owner ? getCharacterById(owner.characterId).color : '#eab308';
         this.rebuildUpgradeBuilding(tile.id, prop?.level || 0, ownerColor);
       }
+      // Rebuilt structures inherit the current faceted-vs-standard material style.
+      this.applyPixelVisualStyle();
     }
     this.renderer.setSize(this.container.clientWidth || window.innerWidth, this.container.clientHeight || window.innerHeight);
+  }
+
+  applyPixelVisualStyle() {
+    const canvas = this.renderer?.domElement;
+    if (canvas) {
+      canvas.style.imageRendering = this.pixelStyle ? 'pixelated' : 'auto';
+      canvas.classList.toggle('pixelated-scene-canvas', this.pixelStyle);
+    }
+    if (this.renderer) {
+      this.renderer.toneMapping = this.pixelStyle ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = this.pixelStyle ? 1 : 1.08;
+    }
+    if (!this.scene) return;
+    this.scene.traverse((object) => {
+      if (!object.isMesh) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        if (!material || !('flatShading' in material)) continue;
+        if (!this.pixelMaterialDefaults.has(material)) {
+          this.pixelMaterialDefaults.set(material, Boolean(material.flatShading));
+        }
+        const nextFlat = this.pixelStyle ? true : this.pixelMaterialDefaults.get(material);
+        if (material.flatShading !== nextFlat) {
+          material.flatShading = nextFlat;
+          material.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  updateRenderResolution() {
+    if (!this.renderer) return;
+    const deviceRatio = window.devicePixelRatio || 1;
+    const qualityRatio = deviceRatio * (this.graphics?.resolution || 1);
+    if (this.pixelStyle) {
+      // Render the world to a deliberately small buffer, then nearest-neighbour
+      // upscale it. Keep UI DOM layers crisp above the WebGL canvas.
+      const cap = this.isCompactViewport ? 0.78 : 0.92;
+      this.renderer.setPixelRatio(Math.max(0.34, Math.min(qualityRatio * 0.42, cap)));
+    } else {
+      const cap = this.isCompactViewport ? 1.35 : 1.8;
+      this.renderer.setPixelRatio(Math.max(0.65, Math.min(qualityRatio, cap)));
+    }
   }
 
   setSmoothAnimation(enabled) {
@@ -1545,6 +1588,20 @@ export class Scene3D {
         detail: this.graphics?.detail || 1,
       })
     );
+    if (this.pixelStyle) {
+      group.traverse((object) => {
+        if (!object.isMesh) return;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          if (!material || !('flatShading' in material)) continue;
+          if (!this.pixelMaterialDefaults.has(material)) {
+            this.pixelMaterialDefaults.set(material, Boolean(material.flatShading));
+          }
+          material.flatShading = true;
+          material.needsUpdate = true;
+        }
+      });
+    }
     if (this.smoothAnimation) {
       group.scale.set(1.15, 0.05, 1.15);
       this.buildingSprings.push({
@@ -1784,9 +1841,7 @@ export class Scene3D {
     this.camera.fov = aspect < 0.72 ? 54 : aspect < 0.95 ? 47 : 40;
     this.camera.updateProjectionMatrix();
     // Cap DPR on phones for smooth 60fps WebGL instead of overheating the GPU.
-    const deviceCap = this.isCompactViewport ? 1.35 : 1.8;
-    const graphicsScale = this.graphics?.resolution || 1;
-    this.renderer.setPixelRatio(Math.max(0.65, Math.min((window.devicePixelRatio || 1) * graphicsScale, deviceCap)));
+    this.updateRenderResolution();
     this.renderer.setSize(w, h);
   }
 
@@ -1833,7 +1888,8 @@ export class Scene3D {
     }
 
     if (this.diceAnim) {
-      const t = Math.min(1, (now - this.diceAnim.startTime) / this.diceAnim.duration);
+      const rawT = Math.min(1, (now - this.diceAnim.startTime) / this.diceAnim.duration);
+      const t = this.pixelStyle && rawT < 1 ? Math.floor(rawT * 12) / 12 : rawT;
       const easeOut = 1 - Math.pow(1 - t, 3);
       const bounceHeight = this.smoothAnimation ? 5.2 : 4.2;
       const bounce = Math.abs(Math.sin(t * Math.PI * 2.5)) * (1 - t) * bounceHeight;
@@ -1905,19 +1961,21 @@ export class Scene3D {
       if (pawn.currentHop) {
         const h = pawn.currentHop;
         const rawP = Math.min(1, (now - h.start) / h.duration);
-        const p = this.smoothAnimation
+        let p = this.smoothAnimation
           ? rawP < 0.5
             ? 2 * rawP * rawP
             : 1 - Math.pow(-2 * rawP + 2, 2) / 2
           : rawP;
+        if (this.pixelStyle && rawP < 1) p = Math.floor(p * 8) / 8;
 
         pawn.group.position.lerpVectors(h.from, h.to, p);
         const arcH = this.smoothAnimation ? 1.95 : 1.55;
-        pawn.group.position.y = BOARD_Y + Math.sin(rawP * Math.PI) * arcH;
+        const arcP = this.pixelStyle && rawP < 1 ? Math.floor(rawP * 8) / 8 : rawP;
+        pawn.group.position.y = BOARD_Y + Math.sin(arcP * Math.PI) * arcH;
 
         const targetYaw = -tileAngle(h.tileId) + Math.PI / 2;
-        if (this.smoothAnimation) {
-          // Shortest-angle smooth yaw interpolation + expressive squash-and-stretch!
+        if (this.smoothAnimation && !this.pixelStyle) {
+          // Standard style keeps the smooth shortest-angle squash-and-stretch.
           let diff = targetYaw - pawn.group.rotation.y;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
@@ -1927,6 +1985,11 @@ export class Scene3D {
           const sy = rawP < 0.14 || rawP > 0.86 ? 0.86 : 1 + stretch * 0.22;
           const sxz = 1 / Math.sqrt(sy);
           pawn.group.scale.set(sxz, sy, sxz);
+        } else if (this.pixelStyle && this.smoothAnimation) {
+          // Retro animation uses chunky pose changes rather than continuous springs.
+          pawn.group.rotation.y = p >= 1 ? targetYaw : pawn.group.rotation.y;
+          const pose = rawP < 0.18 || rawP > 0.82 ? 0.9 : 1.08;
+          pawn.group.scale.set(1 / Math.sqrt(pose), pose, 1 / Math.sqrt(pose));
         } else {
           pawn.group.rotation.y = targetYaw;
           pawn.group.scale.set(1, 1, 1);
@@ -1946,10 +2009,15 @@ export class Scene3D {
         if (this.smoothAnimation) {
           // Gentle spring settle back to (1,1,1) + lively breathing bob for active player!
           const sRate = 1 - Math.exp(-dt * 11);
-          const breath = pawn.indicator.visible ? Math.sin(elapsed * 4.2) * 0.035 : 0;
-          pawn.group.scale.x += (1 - breath * 0.5 - pawn.group.scale.x) * sRate;
-          pawn.group.scale.y += (1 + breath - pawn.group.scale.y) * sRate;
-          pawn.group.scale.z += (1 - breath * 0.5 - pawn.group.scale.z) * sRate;
+          let breath = pawn.indicator.visible ? Math.sin(elapsed * 4.2) * 0.035 : 0;
+          if (this.pixelStyle) breath = Math.round(breath * 3) / 3;
+          if (this.pixelStyle) {
+            pawn.group.scale.set(1 - breath * 0.5, 1 + breath, 1 - breath * 0.5);
+          } else {
+            pawn.group.scale.x += (1 - breath * 0.5 - pawn.group.scale.x) * sRate;
+            pawn.group.scale.y += (1 + breath - pawn.group.scale.y) * sRate;
+            pawn.group.scale.z += (1 - breath * 0.5 - pawn.group.scale.z) * sRate;
+          }
           if (typeof pawn.restAngle === 'number') {
             let diff = pawn.restAngle - pawn.group.rotation.y;
             while (diff > Math.PI) diff -= Math.PI * 2;
@@ -1969,7 +2037,8 @@ export class Scene3D {
     if (this.buildingSprings.length > 0) {
       for (let i = this.buildingSprings.length - 1; i >= 0; i--) {
         const s = this.buildingSprings[i];
-        const t = Math.min(1, (now - s.start) / s.duration);
+        const rawT = Math.min(1, (now - s.start) / s.duration);
+        const t = this.pixelStyle && rawT < 1 ? Math.floor(rawT * 8) / 8 : rawT;
         // easeOutBack spring overshoot
         const c1 = 1.70158;
         const c3 = c1 + 1;
@@ -2008,7 +2077,8 @@ export class Scene3D {
         pt.mesh.rotation.x += pt.rotVel.x * dt;
         pt.mesh.rotation.y += pt.rotVel.y * dt;
         pt.mesh.rotation.z += pt.rotVel.z * dt;
-        pt.mesh.material.opacity = 1 - Math.pow(frac, 1.8);
+        const fade = 1 - Math.pow(frac, 1.8);
+        pt.mesh.material.opacity = this.pixelStyle ? Math.round(fade * 4) / 4 : fade;
       }
     }
 

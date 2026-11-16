@@ -31,6 +31,7 @@ export const GRAPHICS_PRESETS = {
 };
 
 export const DEFAULT_GRAPHICS_SETTINGS = Object.freeze({
+  visualStyle: 'standard',
   preset: 'balanced',
   custom: Object.freeze({
     resolution: 1,
@@ -52,6 +53,7 @@ export function normalizeGraphicsSettings(value) {
     : DEFAULT_GRAPHICS_SETTINGS.preset;
   const custom = value?.custom || {};
   return {
+    visualStyle: value?.visualStyle === 'pixel' ? 'pixel' : 'standard',
     preset,
     custom: {
       resolution: clamp(custom.resolution, 0.65, 2, DEFAULT_GRAPHICS_SETTINGS.custom.resolution),
@@ -68,6 +70,7 @@ export function getEffectiveGraphicsSettings(value) {
   const selected = normalized.preset === 'custom' ? normalized.custom : GRAPHICS_PRESETS[normalized.preset];
   return {
     ...selected,
+    visualStyle: normalized.visualStyle,
     preset: normalized.preset,
     label: normalized.preset === 'custom' ? 'KUSTOM' : GRAPHICS_PRESETS[normalized.preset].label,
   };

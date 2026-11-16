@@ -157,6 +157,10 @@ export default function App() {
     setGraphicsSettings((current) => normalizeGraphicsSettings({ ...current, preset }));
   }, []);
 
+  const handleSetVisualStyle = useCallback((visualStyle) => {
+    setGraphicsSettings((current) => normalizeGraphicsSettings({ ...current, visualStyle }));
+  }, []);
+
   const handleUpdateGraphicsCustom = useCallback((patch) => {
     setGraphicsSettings((current) =>
       normalizeGraphicsSettings({ ...current, preset: 'custom', custom: { ...current.custom, ...patch } })
@@ -164,7 +168,9 @@ export default function App() {
   }, []);
 
   const handleResetGraphics = useCallback(() => {
-    setGraphicsSettings(normalizeGraphicsSettings(DEFAULT_GRAPHICS_SETTINGS));
+    setGraphicsSettings((current) =>
+      normalizeGraphicsSettings({ ...DEFAULT_GRAPHICS_SETTINGS, visualStyle: current.visualStyle })
+    );
   }, []);
 
   const handlePreviewCutscene = useCallback(() => {
@@ -430,7 +436,9 @@ export default function App() {
     <div
       className={`app-root ${smoothAnimation ? 'smooth-anim-on' : ''} ${
         cinematicActive ? 'cinematic-active' : ''
-      } ${activeCutscene ? 'has-cutscene' : ''}`}
+      } ${activeCutscene ? 'has-cutscene' : ''} ${
+        graphicsSettings.visualStyle === 'pixel' ? 'pixel-style-on' : ''
+      }`}
     >
       <div ref={canvasMountRef} className="scene-canvas-container" />
 
@@ -450,8 +458,9 @@ export default function App() {
           onOpenSettings={() => setShowSettings(true)}
           smoothAnimation={smoothAnimation}
           audioMaster={audioSettings.muted ? 0 : audioSettings.master}
-          graphicsPreset={graphicsSettings.preset}
-          busy={busy}
+        graphicsPreset={graphicsSettings.preset}
+        visualStyle={graphicsSettings.visualStyle}
+        busy={busy}
           error={error}
         />
       )}
@@ -624,6 +633,7 @@ export default function App() {
         onToggleSmoothAnimation={handleToggleSmoothAnimation}
         onPreviewCutscene={handlePreviewCutscene}
         graphicsSettings={graphicsSettings}
+        onSetVisualStyle={handleSetVisualStyle}
         onSetGraphicsPreset={handleSetGraphicsPreset}
         onUpdateGraphicsCustom={handleUpdateGraphicsCustom}
         onResetGraphics={handleResetGraphics}
