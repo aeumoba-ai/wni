@@ -353,6 +353,7 @@ export class Scene3D {
 
     this.currentBoard = BOARD_TILES;
     this.currentBoardSeed = DEFAULT_BOARD_SEED;
+    this.smoothAnimation = false; // Default OFF (animasi standar); toggleable in Settings!
     this.tileMeshes = new Map();
     this.tileGlowMeshes = new Map();
     this.tileOwnersHash = new Map();
@@ -363,6 +364,12 @@ export class Scene3D {
     this.flagMesh = null;
     this.dice = [];
     this.diceAnim = null;
+    this.particles = [];
+    this.buildingSprings = [];
+    this.cameraCutscene = null;
+    this.screenShake = 0;
+    this.fxGroup = new THREE.Group();
+    this.scene.add(this.fxGroup);
     this.clock = new THREE.Clock();
 
     this.setupLights();
@@ -974,6 +981,200 @@ export class Scene3D {
     }
   }
 
+  setSmoothAnimation(enabled) {
+    this.smoothAnimation = Boolean(enabled);
+    if (!this.smoothAnimation) {
+      this.cameraCutscene = null;
+      this.screenShake = 0;
+      this.clearParticles();
+      for (const pawn of this.pawns.values()) {
+        pawn.group.scale.set(1, 1, 1);
+      }
+      for (const s of this.buildingSprings) {
+        s.group.scale.set(1, 1, 1);
+      }
+      this.buildingSprings = [];
+    }
+  }
+
+  clearParticles() {
+    for (const p of this.particles) {
+      this.fxGroup.remove(p.mesh);
+      if (p.mesh.geometry) p.mesh.geometry.dispose();
+      if (p.mesh.material) p.mesh.material.dispose();
+    }
+    this.particles = [];
+  }
+
+  spawnBurst(origin, kind = 'sparkles', accentHex = '#facc15') {
+    if (!this.smoothAnimation || this.disposed) return;
+
+    const palette =
+      kind === 'confetti'
+        ? ['#facc15', '#ef4444', '#22c55e', '#3b82f6', '#ec4899', '#f97316']
+        : kind === 'siren'
+          ? ['#ef4444', '#2563eb', '#ffffff']
+          : kind === 'coins'
+            ? ['#facc15', '#f59e0b', '#fef08a']
+            : [accentHex, '#fef08a', '#ffffff'];
+
+    const count = kind === 'confetti' || kind === 'coins' ? 38 : kind === 'step' ? 6 : 18;
+    const now = performance.now();
+
+    for (let i = 0; i < count; i++) {
+      const col = palette[i % palette.length];
+      let geo;
+      if (kind === 'coins') {
+        geo = new THREE.CylinderGeometry(0.24, 0.24, 0.08, 10);
+      } else if (kind === 'confetti') {
+        geo = new THREE.BoxGeometry(0.24, 0.05, 0.34);
+      } else if (kind === 'step') {
+        geo = new THREE.SphereGeometry(0.14, 6, 6);
+      } else {
+        geo = new THREE.OctahedronGeometry(0.18, 0);
+      }
+
+      const mat = new THREE.MeshStandardMaterial({
+        color: col,
+        emissive: col,
+        emissiveIntensity: kind === 'step' ? 0.15 : 0.45,
+        roughness: 0.3,
+        metalness: kind === 'coins' ? 0.65 : 0.15,
+        transparent: true,
+        opacity: 1,
+      });
+
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(origin);
+      mesh.position.y += kind === 'step' ? 0.15 : 0.9;
+
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.4;
+      const horizSpeed =
+        kind === 'step'
+          ? 1.8 + Math.random() * 1.4
+          : kind === 'confetti' || kind === 'coins'
+            ? 3.2 + Math.random() * 5.8
+            : 2.2 + Math.random() * 3.8;
+      const upSpeed =
+        kind === 'step'
+          ? 1.5 + Math.random() * 1.2
+          : kind === 'confetti' || kind === 'coins'
+            ? 8.5 + Math.random() * 6.5
+            : 4.5 + Math.random() * 4.2;
+
+      this.fxGroup.add(mesh);
+      this.particles.push({
+        mesh,
+        vel: new THREE.Vector3(Math.cos(angle) * horizSpeed, upSpeed, Math.sin(angle) * horizSpeed),
+        rotVel: new THREE.Vector3(
+          (Math.random() - 0.5) * 10,
+          (Math.random() - 0.5) * 10,
+          (Math.random() - 0.5) * 10
+        ),
+        gravity: kind === 'confetti' ? 7.5 : 15.5,
+        born: now,
+        life: kind === 'step' ? 420 : kind === 'confetti' || kind === 'coins' ? 1900 : 1050,
+      });
+    }
+  }
+
+  playCutsceneCamera(kind, tileId = null, accent = '#facc15') {
+    if (!this.smoothAnimation || this.disposed) return;
+    const now = performance.now();
+
+    if (kind === 'game_start') {
+      this.cameraCutscene = {
+        kind,
+        start: now,
+        duration: 2100,
+        startTheta: this.orbit.theta - Math.PI * 0.65,
+        endTheta: Math.PI / 2,
+        startPhi: 0.46,
+        endPhi: 0.78,
+        startRadius: 56,
+        endRadius: 40,
+        target: new THREE.Vector3(0, 1.5, 0.8),
+      };
+      this.spawnBurst(new THREE.Vector3(0, BOARD_Y + 2.2, 0), 'confetti', '#facc15');
+      return;
+    }
+
+    if (kind === 'jackpot' || kind === 'victory') {
+      this.cameraCutscene = {
+        kind,
+        start: now,
+        duration: kind === 'victory' ? 2800 : 2100,
+        startTheta: this.orbit.theta,
+        endTheta: this.orbit.theta + Math.PI * 0.75,
+        startPhi: 0.76,
+        endPhi: 0.62,
+        startRadius: 34,
+        endRadius: 28,
+        target: new THREE.Vector3(0, 2.2, 0),
+      };
+      this.spawnBurst(new THREE.Vector3(0, BOARD_Y + 2.0, 0), 'coins', '#facc15');
+      this.spawnBurst(new THREE.Vector3(0, BOARD_Y + 3.2, 0), 'confetti', '#facc15');
+      return;
+    }
+
+    if (kind === 'jail_ott') {
+      const pos = tileWorldPos(typeof tileId === 'number' ? tileId : 10, R_MID);
+      const a = tileAngle(typeof tileId === 'number' ? tileId : 10);
+      this.cameraCutscene = {
+        kind,
+        start: now,
+        duration: 1850,
+        startTheta: this.orbit.theta,
+        endTheta: a + 0.25,
+        startPhi: this.orbit.phi,
+        endPhi: 0.86,
+        startRadius: this.orbit.radius,
+        endRadius: 23,
+        target: new THREE.Vector3(pos.x * 0.68, 1.8, pos.z * 0.68),
+      };
+      this.screenShake = 0.55;
+      this.spawnBurst(pos, 'siren', '#ef4444');
+      return;
+    }
+
+    if (kind === 'buy_property' || kind === 'upgrade_property') {
+      const tid = typeof tileId === 'number' ? tileId : 0;
+      const pos = tileWorldPos(tid, R_MID);
+      const a = tileAngle(tid);
+      this.cameraCutscene = {
+        kind,
+        start: now,
+        duration: 1450,
+        startTheta: this.orbit.theta,
+        endTheta: a + 0.18,
+        startPhi: this.orbit.phi,
+        endPhi: 0.84,
+        startRadius: this.orbit.radius,
+        endRadius: 25,
+        target: new THREE.Vector3(pos.x * 0.62, 1.7, pos.z * 0.62),
+      };
+      this.spawnBurst(pos, kind === 'upgrade_property' ? 'coins' : 'sparkles', accent);
+      return;
+    }
+
+    if (kind === 'dice_double') {
+      this.screenShake = 0.35;
+      this.spawnBurst(new THREE.Vector3(0, BOARD_Y + 0.8, 0.7), 'coins', '#f59e0b');
+      return;
+    }
+
+    if (kind === 'bankrupt') {
+      this.screenShake = 0.75;
+      this.spawnBurst(new THREE.Vector3(0, BOARD_Y + 1.5, 0), 'siren', '#dc2626');
+      return;
+    }
+
+    if (kind === 'card_draw' || kind === 'trade_deal') {
+      const origin = typeof tileId === 'number' ? tileWorldPos(tileId, R_MID) : new THREE.Vector3(0, BOARD_Y + 1.2, 0);
+      this.spawnBurst(origin, 'sparkles', accent);
+    }
+  }
+
   resetCamera() {
     this.orbit.desiredTheta = Math.PI / 2;
     this.orbit.desiredPhi = 0.78;
@@ -1111,6 +1312,17 @@ export class Scene3D {
     }
     if (level <= 0) return;
     group.add(buildUpgradeStructure(level, ownerColor));
+    if (this.smoothAnimation) {
+      group.scale.set(1.15, 0.05, 1.15);
+      this.buildingSprings.push({
+        group,
+        start: performance.now(),
+        duration: 620,
+      });
+      this.spawnBurst(tileWorldPos(tileId, R_MID), 'sparkles', ownerColor);
+    } else {
+      group.scale.set(1, 1, 1);
+    }
   }
 
   animateDiceAndMove({ playerId, dice, fromPos, steps, toPos, toJail }) {
@@ -1118,8 +1330,9 @@ export class Scene3D {
 
     this.diceAnim = {
       startTime: performance.now(),
-      duration: 860,
+      duration: this.smoothAnimation ? 920 : 860,
       values: dice,
+      landBurstDone: false,
       startPos: this.dice.map((_, i) => new THREE.Vector3(i === 0 ? -1.4 : 1.4, BOARD_Y + 0.62, 0.8)),
       endPos: [
         new THREE.Vector3(-0.95 + (Math.random() - 0.5) * 0.35, BOARD_Y + 0.58, 0.65 + (Math.random() - 0.5) * 0.35),
@@ -1130,6 +1343,13 @@ export class Scene3D {
         new THREE.Vector3(14 + Math.random() * 5, 12 + Math.random() * 6, 11 + Math.random() * 6),
       ],
     };
+
+    if (this.smoothAnimation && Date.now() >= this.orbit.userControlledUntil) {
+      // Smooth dynamic zoom toward center while dice roll
+      this.orbit.desiredTarget.set(0, 1.5, 0.7);
+      this.orbit.desiredRadius = 27.5;
+      this.orbit.desiredPhi = 0.74;
+    }
 
     const pawn = this.pawns.get(playerId);
     if (!pawn) return;
@@ -1150,7 +1370,9 @@ export class Scene3D {
           delayUntil: s === 1 ? performance.now() + 880 : 0,
         });
       }
-      this.focusTile(toPos);
+      if (!this.smoothAnimation) {
+        this.focusTile(toPos);
+      }
     }
   }
 
@@ -1283,7 +1505,8 @@ export class Scene3D {
     if (this.diceAnim) {
       const t = Math.min(1, (now - this.diceAnim.startTime) / this.diceAnim.duration);
       const easeOut = 1 - Math.pow(1 - t, 3);
-      const bounce = Math.abs(Math.sin(t * Math.PI * 2.5)) * (1 - t) * 4.2;
+      const bounceHeight = this.smoothAnimation ? 5.2 : 4.2;
+      const bounce = Math.abs(Math.sin(t * Math.PI * 2.5)) * (1 - t) * bounceHeight;
 
       this.dice.forEach((die, i) => {
         const s = this.diceAnim.startPos[i];
@@ -1309,6 +1532,11 @@ export class Scene3D {
           die.rotation.copy(targetEuler);
           die.position.y = BOARD_Y + 0.58;
         });
+        if (this.smoothAnimation && !this.diceAnim.landBurstDone) {
+          this.diceAnim.landBurstDone = true;
+          this.screenShake = Math.max(this.screenShake, 0.22);
+          this.spawnBurst(new THREE.Vector3(0, BOARD_Y + 0.5, 0.65), 'sparkles', '#fde047');
+        }
         this.diceAnim = null;
       }
     }
@@ -1327,30 +1555,125 @@ export class Scene3D {
           const toVec = tileWorldPos(next.tileId, R_MID);
           pawn.currentHop = {
             start: now,
-            duration: 185,
+            duration: this.smoothAnimation ? 200 : 185,
             from: fromVec,
             to: toVec,
             tileId: next.tileId,
           };
           soundEngine.playHop(next.stepIdx);
+          if (this.smoothAnimation && Date.now() >= this.orbit.userControlledUntil && !this.cameraCutscene) {
+            this.focusTile(next.tileId);
+          }
         }
       }
 
       if (pawn.currentHop) {
         const h = pawn.currentHop;
-        const p = Math.min(1, (now - h.start) / h.duration);
+        const rawP = Math.min(1, (now - h.start) / h.duration);
+        const p = this.smoothAnimation
+          ? rawP < 0.5
+            ? 2 * rawP * rawP
+            : 1 - Math.pow(-2 * rawP + 2, 2) / 2
+          : rawP;
+
         pawn.group.position.lerpVectors(h.from, h.to, p);
-        pawn.group.position.y = BOARD_Y + Math.sin(p * Math.PI) * 1.55;
-        pawn.group.rotation.y = -tileAngle(h.tileId) + Math.PI / 2;
-        if (p >= 1) {
+        const arcH = this.smoothAnimation ? 1.95 : 1.55;
+        pawn.group.position.y = BOARD_Y + Math.sin(rawP * Math.PI) * arcH;
+
+        const targetYaw = -tileAngle(h.tileId) + Math.PI / 2;
+        if (this.smoothAnimation) {
+          // Shortest-angle smooth yaw interpolation + expressive squash-and-stretch!
+          let diff = targetYaw - pawn.group.rotation.y;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          pawn.group.rotation.y += diff * Math.min(1, dt * 16);
+
+          const stretch = Math.sin(rawP * Math.PI);
+          const sy = rawP < 0.14 || rawP > 0.86 ? 0.86 : 1 + stretch * 0.22;
+          const sxz = 1 / Math.sqrt(sy);
+          pawn.group.scale.set(sxz, sy, sxz);
+        } else {
+          pawn.group.rotation.y = targetYaw;
+          pawn.group.scale.set(1, 1, 1);
+        }
+
+        if (rawP >= 1) {
           pawn.tileId = h.tileId;
           pawn.currentHop = null;
+          if (this.smoothAnimation) {
+            pawn.group.scale.set(1.12, 0.84, 1.12);
+            this.spawnBurst(h.to, 'step', '#f5e6c8');
+          }
         }
       } else if (pawn.restPos) {
-        pawn.group.position.lerp(pawn.restPos, Math.min(1, dt * 8));
-        if (typeof pawn.restAngle === 'number') {
-          pawn.group.rotation.y = pawn.restAngle;
+        const lerpRate = this.smoothAnimation ? 1 - Math.exp(-dt * 9.5) : Math.min(1, dt * 8);
+        pawn.group.position.lerp(pawn.restPos, lerpRate);
+        if (this.smoothAnimation) {
+          // Gentle spring settle back to (1,1,1) + lively breathing bob for active player!
+          const sRate = 1 - Math.exp(-dt * 11);
+          const breath = pawn.indicator.visible ? Math.sin(elapsed * 4.2) * 0.035 : 0;
+          pawn.group.scale.x += (1 - breath * 0.5 - pawn.group.scale.x) * sRate;
+          pawn.group.scale.y += (1 + breath - pawn.group.scale.y) * sRate;
+          pawn.group.scale.z += (1 - breath * 0.5 - pawn.group.scale.z) * sRate;
+          if (typeof pawn.restAngle === 'number') {
+            let diff = pawn.restAngle - pawn.group.rotation.y;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            pawn.group.rotation.y += diff * lerpRate;
+          }
+        } else {
+          pawn.group.scale.set(1, 1, 1);
+          if (typeof pawn.restAngle === 'number') {
+            pawn.group.rotation.y = pawn.restAngle;
+          }
         }
+      }
+    }
+
+    // Update 3D building construction elastic springs (Smooth Animation ON only)
+    if (this.buildingSprings.length > 0) {
+      for (let i = this.buildingSprings.length - 1; i >= 0; i--) {
+        const s = this.buildingSprings[i];
+        const t = Math.min(1, (now - s.start) / s.duration);
+        // easeOutBack spring overshoot
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        const eased = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+        const sy = Math.max(0.05, eased);
+        const sxz = 1 + (1 - t) * 0.14 * Math.cos(t * Math.PI * 2);
+        s.group.scale.set(sxz, sy, sxz);
+        if (t >= 1) {
+          s.group.scale.set(1, 1, 1);
+          this.buildingSprings.splice(i, 1);
+        }
+      }
+    }
+
+    // Update 3D FX particles (coins, confetti, sparkles, siren flashes, step dust)
+    if (this.particles.length > 0) {
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const pt = this.particles[i];
+        const age = now - pt.born;
+        if (age >= pt.life) {
+          this.fxGroup.remove(pt.mesh);
+          pt.mesh.geometry.dispose();
+          pt.mesh.material.dispose();
+          this.particles.splice(i, 1);
+          continue;
+        }
+        const frac = age / pt.life;
+        pt.vel.y -= pt.gravity * dt;
+        pt.mesh.position.addScaledVector(pt.vel, dt);
+        if (pt.mesh.position.y < BOARD_Y + 0.12) {
+          pt.mesh.position.y = BOARD_Y + 0.12;
+          pt.vel.y *= -0.35;
+          pt.vel.x *= 0.72;
+          pt.vel.z *= 0.72;
+        }
+        pt.mesh.rotation.x += pt.rotVel.x * dt;
+        pt.mesh.rotation.y += pt.rotVel.y * dt;
+        pt.mesh.rotation.z += pt.rotVel.z * dt;
+        pt.mesh.material.opacity = 1 - Math.pow(frac, 1.8);
       }
     }
 
@@ -1359,18 +1682,39 @@ export class Scene3D {
       this.orbit.desiredPhi = 0.92;
       this.orbit.desiredRadius = 42;
       this.orbit.desiredTarget.set(0, 2.0, -2);
+    } else if (this.smoothAnimation && this.cameraCutscene && !this.orbit.dragging) {
+      const cs = this.cameraCutscene;
+      const t = Math.min(1, (now - cs.start) / cs.duration);
+      const ease = 1 - Math.pow(1 - t, 3);
+      this.orbit.desiredTheta = cs.startTheta + (cs.endTheta - cs.startTheta) * ease;
+      this.orbit.desiredPhi = cs.startPhi + (cs.endPhi - cs.startPhi) * ease;
+      this.orbit.desiredRadius = cs.startRadius + (cs.endRadius - cs.startRadius) * ease;
+      this.orbit.desiredTarget.copy(cs.target);
+      if (t >= 1) {
+        this.cameraCutscene = null;
+      }
     }
 
-    const damp = Math.min(1, dt * 6);
+    const damp = this.smoothAnimation ? 1 - Math.exp(-dt * 4.8) : Math.min(1, dt * 6);
     this.orbit.theta += (this.orbit.desiredTheta - this.orbit.theta) * damp;
     this.orbit.phi += (this.orbit.desiredPhi - this.orbit.phi) * damp;
     this.orbit.radius += (this.orbit.desiredRadius - this.orbit.radius) * damp;
     this.orbit.target.lerp(this.orbit.desiredTarget, damp);
 
+    let shakeX = 0;
+    let shakeY = 0;
+    if (this.smoothAnimation && this.screenShake > 0.005) {
+      shakeX = (Math.random() - 0.5) * this.screenShake;
+      shakeY = (Math.random() - 0.5) * this.screenShake;
+      this.screenShake *= Math.exp(-dt * 9.5);
+    } else {
+      this.screenShake = 0;
+    }
+
     const sinPhi = Math.sin(this.orbit.phi);
     this.camera.position.set(
-      this.orbit.target.x + this.orbit.radius * sinPhi * Math.cos(this.orbit.theta),
-      this.orbit.target.y + this.orbit.radius * Math.cos(this.orbit.phi),
+      this.orbit.target.x + this.orbit.radius * sinPhi * Math.cos(this.orbit.theta) + shakeX,
+      this.orbit.target.y + this.orbit.radius * Math.cos(this.orbit.phi) + shakeY,
       this.orbit.target.z + this.orbit.radius * sinPhi * Math.sin(this.orbit.theta)
     );
     this.camera.lookAt(this.orbit.target);
@@ -1381,6 +1725,7 @@ export class Scene3D {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.rafId);
+    this.clearParticles();
     window.removeEventListener('resize', this.onResize);
     if (this._cleanupControls) this._cleanupControls();
     this.renderer.dispose();

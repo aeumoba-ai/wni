@@ -15,6 +15,7 @@ import {
   LogOut,
   ShieldCheck,
   Home,
+  Clapperboard,
 } from 'lucide-react';
 import { soundEngine } from '../game/SoundEngine.js';
 
@@ -72,6 +73,9 @@ export default function SettingsModal({
   open,
   room,
   audioSettings,
+  smoothAnimation,
+  onToggleSmoothAnimation,
+  onPreviewCutscene,
   onUpdateVolume,
   onToggleMute,
   onToggleBgm,
@@ -95,8 +99,9 @@ export default function SettingsModal({
 
   const { master, music, ui, sfx, muted, bgmOn } = audioSettings;
   const inviteUrl = room ? `${window.location.origin}${window.location.pathname}?room=${room.code}` : '';
-  const showAudioTab = !room || activeTab === 'audio';
   const showRoomTab = Boolean(room) && activeTab === 'room';
+  const showAudioTab = activeTab === 'audio';
+  const showAnimTab = activeTab === 'anim';
 
   const copyText = async (text, setter) => {
     try {
@@ -118,13 +123,15 @@ export default function SettingsModal({
       <div
         className="kraft-card modal-card settings-modal-card"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 480 }}
+        style={{ maxWidth: 496 }}
       >
         <div className="modal-header">
           <div>
             <h2 className="modal-title">PENGATURAN</h2>
             <div className="modal-sub">
-              {room ? 'Info ruangan, keamanan & pengaturan audio (%)' : 'Pengaturan volume suara (%), musik & efek'}
+              {room
+                ? 'Info ruangan, audio (%) & mode animasi sinematik'
+                : 'Pengaturan audio (%) & mode animasi sinematik'}
             </div>
           </div>
           <button className="icon-close-btn" onClick={onClose} aria-label="Tutup">
@@ -132,9 +139,9 @@ export default function SettingsModal({
           </button>
         </div>
 
-        {/* Clean segmented tabs inside the single unified Settings modal when in a room */}
-        {room && (
-          <div className="tab-bar settings-tab-bar">
+        {/* Unified segmented tabs inside Settings: RUANGAN (in room) | AUDIO | ANIMASI */}
+        <div className="tab-bar settings-tab-bar">
+          {room && (
             <button
               type="button"
               className={`tab-btn ${activeTab === 'room' ? 'active' : ''}`}
@@ -143,16 +150,27 @@ export default function SettingsModal({
               <Home size={14} />
               <span>RUANGAN</span>
             </button>
-            <button
-              type="button"
-              className={`tab-btn ${activeTab === 'audio' ? 'active' : ''}`}
-              onClick={() => setActiveTab('audio')}
-            >
-              <Volume2 size={14} />
-              <span>AUDIO ({muted ? '0%' : `${master}%`})</span>
-            </button>
-          </div>
-        )}
+          )}
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'audio' ? 'active' : ''}`}
+            onClick={() => setActiveTab('audio')}
+          >
+            <Volume2 size={14} />
+            <span>AUDIO ({muted ? '0%' : `${master}%`})</span>
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'anim' ? 'active' : ''}`}
+            onClick={() => setActiveTab('anim')}
+          >
+            <Clapperboard size={14} />
+            <span>ANIMASI</span>
+            <span className={`settings-tab-pill ${smoothAnimation ? 'on' : ''}`}>
+              {smoothAnimation ? 'ON' : 'OFF'}
+            </span>
+          </button>
+        </div>
 
         <div className="settings-scroll-body">
           {/* TAB 1: RUANGAN & KEAMANAN (only when in a room) */}
@@ -214,9 +232,9 @@ export default function SettingsModal({
                     <span>Cara Main</span>
                   </button>
                 )}
-                <button type="button" className="btn-tan" onClick={() => setActiveTab('audio')}>
-                  <Volume2 size={14} />
-                  <span>Atur Audio</span>
+                <button type="button" className="btn-tan" onClick={() => setActiveTab('anim')}>
+                  <Clapperboard size={14} />
+                  <span>Smooth: {smoothAnimation ? 'ON' : 'OFF'}</span>
                 </button>
               </div>
 
@@ -237,10 +255,9 @@ export default function SettingsModal({
             </div>
           )}
 
-          {/* TAB 2 (or Main Menu): AUDIO CONTROLS */}
+          {/* TAB 2: AUDIO CONTROLS */}
           {showAudioTab && (
             <div className="settings-audio-panel">
-              {/* Quick Preset Strip */}
               <div className="settings-preset-bar">
                 <button
                   type="button"
@@ -273,7 +290,6 @@ export default function SettingsModal({
                 </button>
               </div>
 
-              {/* 4 Independent Volume Percentage Sliders */}
               <div className="settings-sliders-list">
                 <VolumeSliderRow
                   icon={muted || master === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
@@ -384,10 +400,103 @@ export default function SettingsModal({
               </div>
             </div>
           )}
+
+          {/* TAB 3: SMOOTH ANIMATION & CUTSCENE */}
+          {showAnimTab && (
+            <div className="settings-anim-panel">
+              <div className={`smooth-toggle-card ${smoothAnimation ? 'is-on' : ''}`}>
+                <div className="smooth-toggle-head">
+                  <div className="settings-row-title">
+                    <span
+                      className="settings-row-ic"
+                      style={{ background: smoothAnimation ? '#16a34a' : '#64748b' }}
+                    >
+                      <Clapperboard size={16} />
+                    </span>
+                    <div>
+                      <div className="settings-label">Smooth Animation &amp; Cutscene</div>
+                      <div className="settings-desc">
+                        {smoothAnimation
+                          ? 'AKTIF — Semua animasi super mulus + cutscene sinematik aktif'
+                          : 'NONAKTIF (Default) — Animasi standar & ringan tanpa cutscene'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={smoothAnimation}
+                    className={`kraft-switch ${smoothAnimation ? 'on' : ''}`}
+                    onClick={() => onToggleSmoothAnimation(!smoothAnimation)}
+                  >
+                    <span className="kraft-switch-thumb" />
+                    <span className="kraft-switch-label">{smoothAnimation ? 'ON' : 'OFF'}</span>
+                  </button>
+                </div>
+
+                <div className="smooth-mode-pills">
+                  <button
+                    type="button"
+                    className={`smooth-mode-pill ${!smoothAnimation ? 'active' : ''}`}
+                    onClick={() => onToggleSmoothAnimation(false)}
+                  >
+                    Standar / Biasa (OFF)
+                  </button>
+                  <button
+                    type="button"
+                    className={`smooth-mode-pill ${smoothAnimation ? 'active on' : ''}`}
+                    onClick={() => onToggleSmoothAnimation(true)}
+                  >
+                    Smooth + Cutscene (ON)
+                  </button>
+                </div>
+              </div>
+
+              <div className="smooth-features-box">
+                <div className="smooth-features-title">Yang Aktif Saat Mode Smooth ON:</div>
+                <ul className="smooth-features-list">
+                  <li>
+                    <strong>Animasi 3D Super Halus:</strong> Pion melompat lentur (<em>squash &amp; stretch</em>),
+                    konstruksi Ruko/Gedung/Landmark memantul elastis, &amp; partikel koin/konfeti 3D.
+                  </li>
+                  <li>
+                    <strong>Kamera Sinematik Otomatis:</strong> Kamera 3D meluncur halus mengikuti langkah pion,
+                    mendekat ke dadu, hingga <em>fly-in</em> papan Nusantara.
+                  </li>
+                  <li>
+                    <strong>Cutscene Penuh Momen Penting:</strong> Mulai Game, Dadu Double, Beli &amp; Upgrade Aset,
+                    OTT KPK (sirine), Jackpot Kas Negara, Kartu Kebijakan/Lobi, Bangkrut, &amp; Juara.
+                  </li>
+                  <li>
+                    <strong>UI &amp; Kartu 3D Spring:</strong> Transisi modal, HUD, laci Chat/Log, &amp; flip kartu 3D
+                    yang mulus menyeluruh.
+                  </li>
+                </ul>
+              </div>
+
+              <div className="settings-footer-actions" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className={`btn-tan ${!smoothAnimation ? 'is-dimmed' : ''}`}
+                  onClick={() => {
+                    if (!smoothAnimation) {
+                      onToggleSmoothAnimation(true);
+                    }
+                    onClose();
+                    onPreviewCutscene?.();
+                  }}
+                >
+                  <Play size={14} />
+                  <span>Tes Cutscene Sinematik</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <button type="button" className="btn-green full-width" onClick={onClose} style={{ marginTop: 10 }}>
-          SIMPAN & TUTUP
+          SIMPAN &amp; TUTUP
         </button>
       </div>
     </div>

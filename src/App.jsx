@@ -14,6 +14,17 @@ import ActionModals from './components/ActionModals.jsx';
 import PortoModal from './components/PortoModal.jsx';
 import TradeModal, { IncomingTradeModal } from './components/TradeModal.jsx';
 import { ChatDrawer, LogDrawer } from './components/SideDrawers.jsx';
+import CutsceneOverlay from './components/CutsceneOverlay.jsx';
+
+const SMOOTH_ANIM_STORAGE_KEY = 'monopoli_konoha_smooth_anim_v1';
+
+function loadSmoothAnimationPref() {
+  try {
+    return localStorage.getItem(SMOOTH_ANIM_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
 
 function getOrCreateGuestId() {
   let id = sessionStorage.getItem('konoha_guest_id');
@@ -56,14 +67,81 @@ export default function App() {
   const [unreadChat, setUnreadChat] = useState(0);
 
   const [audioSettings, setAudioSettings] = useState(() => soundEngine.getSettings());
+  const [smoothAnimation, setSmoothAnimation] = useState(loadSmoothAnimationPref);
+  const [activeCutscene, setActiveCutscene] = useState(null);
   const [dialogues, setDialogues] = useState({});
   const [moneyDeltas, setMoneyDeltas] = useState({});
 
   const canvasMountRef = useRef(null);
   const sceneRef = useRef(null);
   const clientRef = useRef(null);
+  const cutsceneTimerRef = useRef(null);
+  const smoothAnimRef = useRef(smoothAnimation);
+  smoothAnimRef.current = smoothAnimation;
   const showChatRef = useRef(showChat);
   showChatRef.current = showChat;
+
+  const dismissCutscene = useCallback(() => {
+    if (cutsceneTimerRef.current) {
+      clearTimeout(cutsceneTimerRef.current);
+      cutsceneTimerRef.current = null;
+    }
+    setActiveCutscene(null);
+  }, []);
+
+  const triggerCutscene = useCallback(
+    (payload, force = false) => {
+      if (!force && !smoothAnimRef.current) return;
+      if (!payload || !payload.kind) return;
+      if (cutsceneTimerRef.current) {
+        clearTimeout(cutsceneTimerRef.current);
+      }
+      const duration = payload.duration || 1800;
+      const item = { ...payload, id: `cs_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, duration };
+      setActiveCutscene(item);
+      sceneRef.current?.playCutsceneCamera(payload.kind, payload.tileId ?? null, payload.accent);
+      cutsceneTimerRef.current = setTimeout(() => {
+        cutsceneTimerRef.current = null;
+        setActiveCutscene((prev) => (prev?.id === item.id ? null : prev));
+      }, duration);
+    },
+    []
+  );
+
+  const handleToggleSmoothAnimation = useCallback(
+    (nextVal) => {
+      const enabled = Boolean(nextVal);
+      setSmoothAnimation(enabled);
+      smoothAnimRef.current = enabled;
+      try {
+        localStorage.setItem(SMOOTH_ANIM_STORAGE_KEY, String(enabled));
+      } catch {
+        // ignore
+      }
+      sceneRef.current?.setSmoothAnimation(enabled);
+      if (!enabled) {
+        dismissCutscene();
+      }
+    },
+    [dismissCutscene]
+  );
+
+  const handlePreviewCutscene = useCallback(() => {
+    sceneRef.current?.setSmoothAnimation(true);
+    soundEngine.playJackpot();
+    triggerCutscene(
+      {
+        kind: 'jackpot',
+        title: 'MODE SMOOTH & CUTSCENE AKTIF!',
+        subtitle: 'Animasi 3D sinematik, partikel emas & seluruh transisi halus siap dimainkan!',
+        badge: 'PRATINJAU CUTSCENE',
+        characterId,
+        accent: '#eab308',
+        duration: 2400,
+      },
+      true
+    );
+  }, [characterId, triggerCutscene]);
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -86,12 +164,18 @@ export default function App() {
     const scene = new Scene3D(canvasMountRef.current, (tileId) => {
       setSelectedTileId(tileId);
     });
+    scene.setSmoothAnimation(smoothAnimRef.current);
     sceneRef.current = scene;
     return () => {
       scene.dispose();
       sceneRef.current = null;
     };
   }, []);
+
+  // Keep Three.js scene synced with Smooth Animation setting
+  useEffect(() => {
+    sceneRef.current?.setSmoothAnimation(smoothAnimation);
+  }, [smoothAnimation]);
 
   // Sync 3D Scene with active room state
   useEffect(() => {
@@ -152,6 +236,8 @@ export default function App() {
               return copy;
             });
           }, 3800);
+        } else if (event === 'cutscene') {
+          triggerCutscene(data);
         } else if (event === 'money_delta') {
           setMoneyDeltas((prev) => ({ ...prev, [data.playerId]: data }));
           setTimeout(() => {
@@ -168,10 +254,11 @@ export default function App() {
     clientRef.current = client;
 
     return () => {
+      dismissCutscene();
       client.destroy();
       clientRef.current = null;
     };
-  }, [guestId]);
+  }, [guestId, triggerCutscene, dismissCutscene]);
 
   const emitAction = useCallback(
     async (action, payload = {}) => {
@@ -284,7 +371,7 @@ export default function App() {
       : null;
 
   return (
-    <div className="app-root">
+    <div className={`app-root ${smoothAnimation ? 'smooth-anim-on' : ''}`}>
       <div ref={canvasMountRef} className="scene-canvas-container" />
 
       {toast && <div className="global-toast">{toast}</div>}
@@ -471,6 +558,9 @@ export default function App() {
         open={showSettings}
         room={room}
         audioSettings={audioSettings}
+        smoothAnimation={smoothAnimation}
+        onToggleSmoothAnimation={handleToggleSmoothAnimation}
+        onPreviewCutscene={handlePreviewCutscene}
         onUpdateVolume={handleUpdateVolume}
         onToggleMute={handleToggleMute}
         onToggleBgm={handleToggleBgm}
@@ -480,6 +570,10 @@ export default function App() {
         onLeaveRoom={handleLeaveRoom}
         onClose={() => setShowSettings(false)}
       />
+
+      {smoothAnimation && (
+        <CutsceneOverlay cutscene={activeCutscene} onDismiss={dismissCutscene} />
+      )}
 
       {showHowToPlay && <HowToPlayModal onClose={() => setShowHowToPlay(false)} />}
     </div>

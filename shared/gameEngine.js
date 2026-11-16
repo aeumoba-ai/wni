@@ -96,6 +96,14 @@ export class GameEngine {
     this.destroyed = false;
 
     this.addLog('Peta 40 petak Nusantara diacak baru untuk game ini! Semua pemain mulai dengan modal Rp15.000.000.');
+    this.emitEvent('cutscene', {
+      kind: 'game_start',
+      title: 'MONOPOLI NEGERI KONOHA',
+      subtitle: `40 Petak Nusantara Acak • ${this.players.length} Pemain Siap Berebut Aset!`,
+      badge: 'PERMAINAN DIMULAI',
+      accent: '#f59e0b',
+      duration: 2100,
+    });
     this.startTurn();
   }
 
@@ -466,6 +474,20 @@ export class GameEngine {
       passedStart,
     });
 
+    if (canRollAgain) {
+      this.emitEvent('cutscene', {
+        kind: 'dice_double',
+        title: `DADU KEMBAR ${d1} + ${d2}!`,
+        subtitle: `${player.name} dapat bonus lempar dadu lagi!`,
+        badge: 'DOUBLE BONUS',
+        characterId: player.characterId,
+        playerName: player.name,
+        tileId: toPos,
+        accent: '#f59e0b',
+        duration: 1550,
+      });
+    }
+
     this.statusText = `${player.name} melempar ${d1} + ${d2} = ${steps} langkah...`;
     const modeLabel = this.lastRollMode === 'acak' ? '' : ` [${this.lastRollMode.toUpperCase()}]`;
     this.addLog(`${player.name} melempar dadu [${d1}+${d2}=${steps}]${modeLabel} menuju ${getTileById(toPos, this.board).name}.`);
@@ -493,6 +515,17 @@ export class GameEngine {
     this.consecutiveDoubles = 0;
     this.speak(player, 'jail');
     this.emitEvent('sfx', { sound: 'siren' });
+    this.emitEvent('cutscene', {
+      kind: 'jail_ott',
+      title: 'TERKENA OTT KPK!',
+      subtitle: `${player.name} langsung digelandang menuju Rutan KPK!`,
+      badge: 'OPERASI TANGKAP TANGAN',
+      characterId: player.characterId,
+      playerName: player.name,
+      tileId: JAIL_TILE_ID,
+      accent: '#dc2626',
+      duration: 2100,
+    });
   }
 
   calculateRent(tile, prop, diceTotal = 7) {
@@ -564,6 +597,17 @@ export class GameEngine {
       this.kasNegara = INITIAL_KAS_NEGARA;
       this.floatMoney(player.id, payout);
       this.emitEvent('sfx', { sound: 'jackpot' });
+      this.emitEvent('cutscene', {
+        kind: 'jackpot',
+        title: `JACKPOT ${formatShortRupiah(payout)}!`,
+        subtitle: `${player.name} mencairkan seluruh Dana Kas Negara!`,
+        badge: 'KAS NEGARA CAIR',
+        characterId: player.characterId,
+        playerName: player.name,
+        tileId: tile.id,
+        accent: '#eab308',
+        duration: 2200,
+      });
       this.addLog(`💰 JACKPOT! ${player.name} mencairkan Kas Negara sebesar ${formatShortRupiah(payout)}!`, 'money');
       this.speak(player, 'rentReceive', `Cair! Kas Negara ${formatShortRupiah(payout)} masuk kantong!`);
       this.statusText = `${player.name} memenangkan jackpot Kas Negara ${formatShortRupiah(payout)}!`;
@@ -598,6 +642,17 @@ export class GameEngine {
         canRollAgain,
       };
       this.emitEvent('sfx', { sound: 'card' });
+      this.emitEvent('cutscene', {
+        kind: 'card_draw',
+        title: card.title,
+        subtitle: `${player.name} membuka Kartu ${tile.type === 'policy' ? 'Kebijakan' : 'Lobi Orang Dalam'}`,
+        badge: tile.type === 'policy' ? 'KARTU KEBIJAKAN' : 'KARTU LOBI',
+        characterId: player.characterId,
+        playerName: player.name,
+        tileId: tile.id,
+        accent: tile.type === 'policy' ? '#2563eb' : '#d97706',
+        duration: 1550,
+      });
       this.speak(player, 'card');
       this.statusText = `${player.name} membuka kartu ${tile.type === 'policy' ? 'Kebijakan' : 'Lobi Orang Dalam'}: ${card.title}`;
       this.addLog(`🃏 ${player.name} mendapat kartu "${card.title}" — ${card.description}`, 'card');
@@ -855,6 +910,16 @@ export class GameEngine {
     }
 
     this.emitEvent('sfx', { sound: 'bankrupt' });
+    this.emitEvent('cutscene', {
+      kind: 'bankrupt',
+      title: `${player.name.toUpperCase()} BANGKRUT!`,
+      subtitle: `Seluruh aset disita karena gagal membayar ${reason}`,
+      badge: 'SITA ASET BANK',
+      characterId: player.characterId,
+      playerName: player.name,
+      accent: '#991b1b',
+      duration: 2100,
+    });
     this.addLog(`💀 BANGKRUT! ${player.name} disita bank karena gagal membayar ${reason}!`, 'warn');
     this.speak(player, 'rentPay', 'Asetku disita semua... saya bangkrut!');
     this.statusText = `${player.name} dinyatakan BANGKRUT!`;
@@ -1063,6 +1128,17 @@ export class GameEngine {
       this.properties[tileId] = { ownerId: player.id, level: 0 };
       this.floatMoney(player.id, -price);
       this.emitEvent('sfx', { sound: 'buy' });
+      this.emitEvent('cutscene', {
+        kind: 'buy_property',
+        title: tile.name.toUpperCase(),
+        subtitle: `${player.name} resmi membeli aset seharga ${formatShortRupiah(price)}!`,
+        badge: 'ASET BARU',
+        characterId: player.characterId,
+        playerName: player.name,
+        tileId,
+        accent: tile.color || '#16a34a',
+        duration: 1650,
+      });
       this.speak(player, 'buy');
       this.addLog(`🏠 ${player.name} membeli ${tile.name} seharga ${formatShortRupiah(price)}!`, 'buy');
       this.statusText = `${player.name} resmi memiliki ${tile.name}!`;
@@ -1124,6 +1200,17 @@ export class GameEngine {
     const levelNames = ['Tanah', 'Ruko', 'Gedung', 'Landmark'];
     this.floatMoney(player.id, -tile.upgradeCost);
     this.emitEvent('sfx', { sound: 'upgrade' });
+    this.emitEvent('cutscene', {
+      kind: 'upgrade_property',
+      title: `${levelNames[prop.level].toUpperCase()} DI ${tile.name.toUpperCase()}!`,
+      subtitle: `${player.name} mengembangkan properti (${formatShortRupiah(tile.upgradeCost)})`,
+      badge: `UPGRADE LV.${prop.level}`,
+      characterId: player.characterId,
+      playerName: player.name,
+      tileId,
+      accent: tile.color || '#0284c7',
+      duration: 1700,
+    });
     this.addLog(
       `🏗️ ${player.name} membangun ${levelNames[prop.level]} di ${tile.name} (${formatShortRupiah(tile.upgradeCost)})!`,
       'buy'
@@ -1317,6 +1404,16 @@ export class GameEngine {
     }
 
     this.emitEvent('sfx', { sound: 'buy' });
+    this.emitEvent('cutscene', {
+      kind: 'trade_deal',
+      title: 'DEAL DAGANG SAH!',
+      subtitle: `${fromP.name} & ${toP.name} menuntaskan pertukaran aset!`,
+      badge: 'TRANSAKSI BERHASIL',
+      characterId: fromP.characterId,
+      playerName: fromP.name,
+      accent: '#059669',
+      duration: 1600,
+    });
     this.addLog(`🤝 DEAL! ${fromP.name} dan ${toP.name} menyelesaikan transaksi dagang!`, 'buy');
     this.broadcast();
     return true;
@@ -1399,6 +1496,18 @@ export class GameEngine {
       if (winPlayer) this.speak(winPlayer, 'win');
     }
     this.emitEvent('sfx', { sound: 'jackpot' });
+    if (this.winner) {
+      this.emitEvent('cutscene', {
+        kind: 'victory',
+        title: `${this.winner.name.toUpperCase()} JUARA!`,
+        subtitle: `Sultan Terkaya Negeri Konoha — Kekayaan ${formatShortRupiah(this.winner.netWorth)}`,
+        badge: 'PEMENANG MUTLAK',
+        characterId: this.winner.characterId,
+        playerName: this.winner.name,
+        accent: '#eab308',
+        duration: 2800,
+      });
+    }
     this.broadcast();
   }
 
