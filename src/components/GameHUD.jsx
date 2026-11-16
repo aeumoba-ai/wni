@@ -35,6 +35,7 @@ export default function GameHUD({
   onOpenChat,
   onOpenLog,
   onOpenRoomInfo,
+  onOpenSettings,
   onOpenPorto,
   onOpenTrade,
   onRollDice,
@@ -216,7 +217,7 @@ export default function GameHUD({
             <button className="hud-circle-btn" onClick={onResetCamera} title="Reset Kamera">
               <Camera size={17} />
             </button>
-            <button className="hud-circle-btn" onClick={onOpenRoomInfo} title="Info Ruangan">
+            <button className="hud-circle-btn" onClick={onOpenSettings} title="Pengaturan Suara & Game">
               <Settings size={17} />
             </button>
           </div>

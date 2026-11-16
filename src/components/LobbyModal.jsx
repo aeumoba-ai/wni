@@ -9,6 +9,7 @@ import {
   Shuffle,
   RefreshCw,
   ArrowRight,
+  Settings,
 } from 'lucide-react';
 import { CHARACTERS, RANDOM_GUEST_NAMES, getCharacterById } from '../../shared/characters.js';
 import AvatarIcon from './AvatarIcon.jsx';
@@ -24,6 +25,7 @@ export default function LobbyModal({
   onPreviewRoom,
   onListPublicRooms,
   onOpenHowToPlay,
+  onOpenSettings,
   busy,
   error,
 }) {
@@ -389,15 +391,24 @@ export default function LobbyModal({
           </div>
         )}
 
-        <button
-          type="button"
-          className="btn-tan full-width"
-          onClick={onOpenHowToPlay}
-          style={{ marginTop: 9 }}
-        >
-          <BookOpen size={15} />
-          <span>CARA MAIN</span>
-        </button>
+        <div className="lobby-bottom-actions">
+          <button
+            type="button"
+            className="btn-tan flex-1"
+            onClick={onOpenHowToPlay}
+          >
+            <BookOpen size={15} />
+            <span>CARA MAIN</span>
+          </button>
+          <button
+            type="button"
+            className="btn-tan flex-1"
+            onClick={onOpenSettings}
+          >
+            <Settings size={15} />
+            <span>PENGATURAN</span>
+          </button>
+        </div>
       </div>
     </div>
   );

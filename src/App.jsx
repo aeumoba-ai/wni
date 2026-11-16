@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { X } from 'lucide-react';
+import { X, Settings } from 'lucide-react';
 import { COLOR_GROUPS, formatShortRupiah, getTileById } from '../shared/boardData.js';
 import { RoomClient } from './net/RoomClient.js';
 import { Scene3D } from './game/Scene3D.js';
@@ -7,6 +7,7 @@ import { soundEngine } from './game/SoundEngine.js';
 import LobbyModal from './components/LobbyModal.jsx';
 import RoomWaitingModal from './components/RoomWaitingModal.jsx';
 import HowToPlayModal from './components/HowToPlayModal.jsx';
+import SettingsModal from './components/SettingsModal.jsx';
 import GameHUD from './components/GameHUD.jsx';
 import ActionModals from './components/ActionModals.jsx';
 import PortoModal from './components/PortoModal.jsx';
@@ -45,6 +46,7 @@ export default function App() {
   const [toast, setToast] = useState('');
 
   const [showHowToPlay, setShowHowToPlay] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showPorto, setShowPorto] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
   const [showChat, setShowChat] = useState(false);
@@ -53,8 +55,9 @@ export default function App() {
   const [selectedTileId, setSelectedTileId] = useState(null);
   const [unreadChat, setUnreadChat] = useState(0);
 
-  const [muted, setMuted] = useState(false);
-  const [bgmOn, setBgmOn] = useState(false);
+  const [audioSettings, setAudioSettings] = useState(() => soundEngine.getSettings());
+  const muted = audioSettings.muted;
+  const bgmOn = audioSettings.bgmOn;
   const [dialogues, setDialogues] = useState({});
   const [moneyDeltas, setMoneyDeltas] = useState({});
 
@@ -236,16 +239,46 @@ export default function App() {
   };
 
   const handleToggleMute = () => {
-    const nextMuted = soundEngine.toggleMute();
-    setMuted(nextMuted);
-    if (nextMuted) setBgmOn(false);
+    soundEngine.toggleMute();
+    setAudioSettings(soundEngine.getSettings());
   };
 
   const handleToggleBgm = () => {
-    const playing = soundEngine.toggleBgm();
-    setBgmOn(playing);
-    if (playing) setMuted(false);
+    soundEngine.toggleBgm();
+    setAudioSettings(soundEngine.getSettings());
   };
+
+  const handleUpdateVolume = (channel, percent) => {
+    const next = soundEngine.setVolume(channel, percent);
+    setAudioSettings(next);
+  };
+
+  const handleApplyAudioPreset = (masterPct) => {
+    const next = soundEngine.applySettings({
+      muted: masterPct === 0,
+      master: masterPct,
+    });
+    setAudioSettings(next);
+    if (masterPct > 0) soundEngine.playTurnChime();
+  };
+
+  const handleResetAudio = () => {
+    const next = soundEngine.resetSettings();
+    setAudioSettings(next);
+    soundEngine.playTurnChime();
+  };
+
+  // Global subtle UI click SFX on every enabled button (respects Suara Klik & UI volume %)
+  useEffect(() => {
+    const onDocClick = (e) => {
+      const btn = e.target?.closest?.('button:not(:disabled)');
+      if (!btn) return;
+      if (btn.classList.contains('settings-test-btn')) return;
+      soundEngine.playClick();
+    };
+    document.addEventListener('click', onDocClick, true);
+    return () => document.removeEventListener('click', onDocClick, true);
+  }, []);
 
   const isPlaying = room?.status === 'playing' && room?.game;
   const incomingTrade =
@@ -259,6 +292,18 @@ export default function App() {
 
       {toast && <div className="global-toast">{toast}</div>}
 
+      {!isPlaying && (
+        <button
+          type="button"
+          className="floating-settings-btn"
+          onClick={() => setShowSettings(true)}
+          title="Pengaturan Suara"
+        >
+          <Settings size={16} />
+          <span>Pengaturan</span>
+        </button>
+      )}
+
       {!room && (
         <LobbyModal
           playerName={playerName}
@@ -271,6 +316,7 @@ export default function App() {
           onPreviewRoom={handlePreviewRoom}
           onListPublicRooms={handleListPublicRooms}
           onOpenHowToPlay={() => setShowHowToPlay(true)}
+          onOpenSettings={() => setShowSettings(true)}
           busy={busy}
           error={error}
         />
@@ -316,6 +362,7 @@ export default function App() {
               setShowLog((v) => !v);
             }}
             onOpenRoomInfo={() => setShowRoomInfo(true)}
+            onOpenSettings={() => setShowSettings(true)}
             onOpenPorto={() => setShowPorto(true)}
             onOpenTrade={() => setShowTrade(true)}
             onRollDice={(mode) => emitAction('game_roll', { mode })}
@@ -446,6 +493,20 @@ export default function App() {
           })()}
         </>
       )}
+
+      <SettingsModal
+        open={showSettings}
+        audioSettings={audioSettings}
+        onUpdateVolume={handleUpdateVolume}
+        onToggleMute={handleToggleMute}
+        onToggleBgm={handleToggleBgm}
+        onApplyPreset={handleApplyAudioPreset}
+        onResetAudio={handleResetAudio}
+        inRoom={Boolean(isPlaying)}
+        onOpenRoomInfo={() => setShowRoomInfo(true)}
+        onOpenHowToPlay={() => setShowHowToPlay(true)}
+        onClose={() => setShowSettings(false)}
+      />
 
       {showHowToPlay && <HowToPlayModal onClose={() => setShowHowToPlay(false)} />}
     </div>
