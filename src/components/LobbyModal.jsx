@@ -402,24 +402,15 @@ export default function LobbyModal({
           </div>
         )}
 
-        <div className="lobby-bottom-actions">
-          <button
-            type="button"
-            className="btn-tan flex-1"
-            onClick={onOpenHowToPlay}
-          >
-            <BookOpen size={15} />
-            <span>CARA MAIN</span>
-          </button>
-          <button
-            type="button"
-            className="btn-tan flex-1"
-            onClick={onOpenSettings}
-          >
-            <Settings size={15} />
-            <span>PENGATURAN</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          className="btn-tan full-width"
+          style={{ marginTop: 10 }}
+          onClick={onOpenHowToPlay}
+        >
+          <BookOpen size={15} />
+          <span>CARA MAIN</span>
+        </button>
       </div>
     </div>
   );

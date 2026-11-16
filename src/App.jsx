@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { COLOR_GROUPS, formatShortRupiah, getTileById } from '../shared/boardData.js';
+import { cryptoRandomToken } from '../shared/security.js';
 import { RoomClient } from './net/RoomClient.js';
 import { Scene3D } from './game/Scene3D.js';
 import { soundEngine } from './game/SoundEngine.js';
@@ -16,8 +17,8 @@ import { ChatDrawer, LogDrawer } from './components/SideDrawers.jsx';
 
 function getOrCreateGuestId() {
   let id = sessionStorage.getItem('konoha_guest_id');
-  if (!id) {
-    id = `guest_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  if (!id || !/^guest_[a-zA-Z0-9_-]{8,48}$/.test(id)) {
+    id = `guest_${cryptoRandomToken(10)}`;
     sessionStorage.setItem('konoha_guest_id', id);
   }
   return id;

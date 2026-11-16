@@ -1,10 +1,22 @@
 import Peer from 'peerjs';
 import { BOT_NAMES, CHARACTERS } from '../../shared/characters.js';
 import { GameEngine } from '../../shared/gameEngine.js';
+import {
+  constantTimeEqual,
+  createRateLimiter,
+  cryptoRandomInt,
+  cryptoRandomToken,
+  sanitizePayload,
+  sanitizeText,
+} from '../../shared/security.js';
 
 const PEER_PREFIX = 'monopoli-konoha-wni-v1-';
 const BC_CHANNEL_NAME = 'monopoli-konoha-wni-local-v1';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const MAX_PACKET_BYTES = 8192;
+const MAX_PASSWORD_FAILS = 5;
+const PASSWORD_LOCKOUT_MS = 30_000;
+const CHAT_COOLDOWN_MS = 700;
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -16,17 +28,25 @@ const ICE_SERVERS = [
 function generateRoomCode() {
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    code += CODE_CHARS[cryptoRandomInt(CODE_CHARS.length)];
   }
   return code;
 }
 
 function sanitizeName(raw, fallback = 'Tamu') {
-  const clean = String(raw || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .slice(0, 18);
-  return clean || fallback;
+  return sanitizeText(raw, 18, fallback);
+}
+
+function isValidGuestId(id) {
+  return typeof id === 'string' && /^[a-zA-Z0-9_-]{6,64}$/.test(id) && !id.startsWith('bot_');
+}
+
+function isOversizedPacket(msg) {
+  try {
+    return JSON.stringify(msg).length > MAX_PACKET_BYTES;
+  } catch {
+    return true;
+  }
 }
 
 function makeRoomPreview(room) {
@@ -64,9 +84,13 @@ export class RoomClient {
     this.peer = null;
     this.hostConn = null; // DataConnection when guest via PeerJS
     this.guestConns = new Map(); // guestId -> { via: 'peer'|'bc', conn?, tabId? }
+    this.bcTabBindings = new Map(); // fromTab -> boundGuestId (blocks BroadcastChannel ID spoofing)
+    this.rpcLimiter = createRateLimiter({ maxRequests: 14, windowMs: 3000, maxKeys: 200 });
+    this.failedPasswords = new Map(); // connKey -> { count, lockedUntil }
+    this.lastChatAt = new Map(); // senderId -> timestamp
     this.pendingReplies = new Map(); // reqId -> { resolve, timer }
     this.bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(BC_CHANNEL_NAME) : null;
-    this.tabId = `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    this.tabId = `tab_${Date.now().toString(36)}_${cryptoRandomToken(4)}`;
     this.guestVia = null; // 'bc' | 'peer'
     this.guestHostTabId = null;
     this.guestRoomCode = null;
@@ -79,7 +103,7 @@ export class RoomClient {
 
     this._beforeUnload = () => {
       if (this.role === 'host' && this.room) {
-        this.unregisterPublicRoom(this.room.code);
+        this.unregisterPublicRoom(this.room.code, this.room.hostSecret);
         this.broadcastRaw({ type: 'host_closed', code: this.room.code });
       }
     };
@@ -98,17 +122,21 @@ export class RoomClient {
       await fetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(makeRoomPreview(room)),
+        body: JSON.stringify({
+          ...makeRoomPreview(room),
+          hostSecret: room.hostSecret,
+        }),
       });
     } catch {
       // Optional directory - ignore if offline
     }
   }
 
-  unregisterPublicRoom(code) {
+  unregisterPublicRoom(code, hostSecret) {
     if (!code) return;
     try {
-      fetch(`/api/rooms?code=${encodeURIComponent(code)}`, {
+      const secretParam = hostSecret ? `&hostSecret=${encodeURIComponent(hostSecret)}` : '';
+      fetch(`/api/rooms?code=${encodeURIComponent(code)}${secretParam}`, {
         method: 'DELETE',
         keepalive: true,
       }).catch(() => {});
@@ -317,11 +345,13 @@ export class RoomClient {
     this.role = 'host';
     this.room = {
       code,
+      hostSecret: cryptoRandomToken(24), // Secret token for authenticated /api/rooms updates & deletion
       name: roomName,
       maxPlayers,
       isPrivate,
       password,
       hostId: this.guestId,
+      kickedIds: new Set(),
       status: 'waiting',
       settings: { speed: 'normal', maxRounds: 25 },
       players: [
@@ -405,11 +435,52 @@ export class RoomClient {
     }
   }
 
+  checkPasswordLockout(connKey) {
+    const rec = this.failedPasswords.get(connKey);
+    if (!rec) return false;
+    if (rec.lockedUntil && Date.now() < rec.lockedUntil) return true;
+    if (rec.lockedUntil && Date.now() >= rec.lockedUntil) {
+      this.failedPasswords.delete(connKey);
+    }
+    return false;
+  }
+
+  recordPasswordFailure(connKey) {
+    const rec = this.failedPasswords.get(connKey) || { count: 0, lockedUntil: 0 };
+    rec.count += 1;
+    if (rec.count >= MAX_PASSWORD_FAILS) {
+      rec.lockedUntil = Date.now() + PASSWORD_LOCKOUT_MS;
+    }
+    this.failedPasswords.set(connKey, rec);
+    return rec.count >= MAX_PASSWORD_FAILS;
+  }
+
   attachPeerGuest(conn) {
     let boundGuestId = null;
+    const connKey = `peer_${conn.peer || 'anon'}_${Date.now()}`;
 
     conn.on('data', (msg) => {
-      if (!msg || typeof msg !== 'object') return;
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
+      if (isOversizedPacket(msg)) {
+        try {
+          conn.close();
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      if (!this.rpcLimiter.allow(connKey)) {
+        if (msg.type === 'rpc' && conn.open) {
+          conn.send({
+            type: 'rpc_reply',
+            reqId: msg.reqId,
+            result: { error: 'Terlalu banyak permintaan! Pelan-pelan ya.' },
+          });
+        }
+        return;
+      }
+
       if (msg.type === 'preview_request') {
         conn.send({
           type: 'preview_response',
@@ -419,15 +490,65 @@ export class RoomClient {
       }
 
       if (msg.type === 'rpc') {
-        const { reqId, action, payload } = msg;
-        const senderId = payload?.guestId || boundGuestId;
-        if (action === 'join_room' && senderId) {
-          boundGuestId = senderId;
+        const reqId = typeof msg.reqId === 'string' ? msg.reqId.slice(0, 64) : '';
+        const action = typeof msg.action === 'string' ? msg.action.slice(0, 48) : '';
+        const safePayload = sanitizePayload(msg.payload);
+
+        let senderId = boundGuestId;
+        if (action === 'join_room') {
+          if (boundGuestId) {
+            if (conn.open) {
+              conn.send({ type: 'rpc_reply', reqId, result: { error: 'Sudah bergabung di ruangan.' } });
+            }
+            return;
+          }
+          if (this.checkPasswordLockout(connKey)) {
+            if (conn.open) {
+              conn.send({
+                type: 'rpc_reply',
+                reqId,
+                result: { error: 'Terlalu banyak percobaan password salah. Coba lagi 30 detik.' },
+              });
+            }
+            return;
+          }
+          const requestedId = safePayload.guestId;
+          if (!isValidGuestId(requestedId) || requestedId === this.room?.hostId) {
+            if (conn.open) {
+              conn.send({ type: 'rpc_reply', reqId, result: { error: 'ID sesi tamu tidak valid.' } });
+            }
+            return;
+          }
+          senderId = requestedId;
           this.guestConns.set(senderId, { via: 'peer', conn });
+        } else if (!senderId) {
+          // Strictly reject any unauthenticated RPC (prevents identity spoofing & host takeover!)
+          if (conn.open) {
+            conn.send({ type: 'rpc_reply', reqId, result: { error: 'Sesi belum terautentikasi.' } });
+          }
+          return;
         }
-        const res = this.executeHostAction(senderId, action, payload || {});
-        if (action === 'join_room' && !res.ok && senderId) {
-          this.guestConns.delete(senderId);
+
+        const res = this.executeHostAction(senderId, action, safePayload, connKey);
+        if (action === 'join_room') {
+          if (res.ok) {
+            boundGuestId = senderId;
+            this.failedPasswords.delete(connKey);
+          } else {
+            this.guestConns.delete(senderId);
+            if (res.needPassword && this.recordPasswordFailure(connKey)) {
+              res.error = 'Terlalu banyak percobaan password salah. Koneksi diputus (tunggu 30 detik).';
+              if (conn.open) conn.send({ type: 'rpc_reply', reqId, result: res });
+              setTimeout(() => {
+                try {
+                  conn.close();
+                } catch {
+                  // ignore
+                }
+              }, 80);
+              return;
+            }
+          }
         }
         if (conn.open) {
           conn.send({ type: 'rpc_reply', reqId, result: res });
@@ -436,6 +557,7 @@ export class RoomClient {
     });
 
     conn.on('close', () => {
+      this.rpcLimiter.clear(connKey);
       if (boundGuestId) {
         this.handleHostGuestDisconnect(boundGuestId);
       }
@@ -444,7 +566,11 @@ export class RoomClient {
 
   handleHostGuestDisconnect(guestId) {
     if (!this.room || this.role !== 'host') return;
+    if (guestId === this.room.hostId) return; // Host cannot be disconnected as a guest
     this.guestConns.delete(guestId);
+    for (const [tab, gid] of this.bcTabBindings.entries()) {
+      if (gid === guestId) this.bcTabBindings.delete(tab);
+    }
     const idx = this.room.players.findIndex((p) => p.id === guestId && !p.isBot);
     if (idx === -1) return;
     const pl = this.room.players[idx];
@@ -468,10 +594,12 @@ export class RoomClient {
 
   // ==================== BROADCAST CHANNEL (SAME-BROWSER MULTI-TAB) ====================
   handleBroadcastMessage(msg) {
-    if (!msg || msg.fromTab === this.tabId) return;
+    if (!msg || typeof msg !== 'object' || msg.fromTab === this.tabId) return;
+    if (isOversizedPacket(msg)) return;
 
     // Host handling local probes & local guest RPCs
     if (this.role === 'host' && this.room) {
+      const connKey = `bc_${String(msg.fromTab || 'unknown').slice(0, 48)}`;
       if (msg.type === 'public_room_ping' && !this.room.isPrivate && this.room.status === 'waiting') {
         this.bc.postMessage({
           type: 'public_room_pong',
@@ -492,25 +620,61 @@ export class RoomClient {
         return;
       }
       if (msg.type === 'rpc' && msg.code === this.room.code) {
-        const senderId = msg.guestId;
-        if (msg.action === 'join_room' && senderId) {
-          this.guestConns.set(senderId, { via: 'bc', tabId: msg.fromTab });
+        const reply = (result) =>
+          this.bc.postMessage({
+            type: 'rpc_reply',
+            reqId: msg.reqId,
+            toTab: msg.fromTab,
+            fromTab: this.tabId,
+            result,
+          });
+
+        if (!this.rpcLimiter.allow(connKey)) {
+          reply({ error: 'Terlalu banyak permintaan! Pelan-pelan ya.' });
+          return;
         }
-        const res = this.executeHostAction(senderId, msg.action, msg.payload || {});
-        if (msg.action === 'join_room' && !res.ok && senderId) {
-          this.guestConns.delete(senderId);
+
+        const action = typeof msg.action === 'string' ? msg.action.slice(0, 48) : '';
+        const safePayload = sanitizePayload(msg.payload);
+        let boundId = this.bcTabBindings.get(msg.fromTab) || null;
+
+        if (action === 'join_room') {
+          if (this.checkPasswordLockout(connKey)) {
+            reply({ error: 'Terlalu banyak percobaan password salah. Coba lagi 30 detik.' });
+            return;
+          }
+          const reqGuestId = safePayload.guestId || msg.guestId;
+          if (!isValidGuestId(reqGuestId) || reqGuestId === this.room.hostId) {
+            reply({ error: 'ID sesi tamu tidak valid.' });
+            return;
+          }
+          boundId = reqGuestId;
+          this.guestConns.set(boundId, { via: 'bc', tabId: msg.fromTab });
+        } else if (!boundId) {
+          reply({ error: 'Sesi tab belum terautentikasi.' });
+          return;
         }
-        this.bc.postMessage({
-          type: 'rpc_reply',
-          reqId: msg.reqId,
-          toTab: msg.fromTab,
-          fromTab: this.tabId,
-          result: res,
-        });
+
+        const res = this.executeHostAction(boundId, action, safePayload, connKey);
+        if (action === 'join_room') {
+          if (res.ok) {
+            this.bcTabBindings.set(msg.fromTab, boundId);
+            this.failedPasswords.delete(connKey);
+          } else {
+            this.guestConns.delete(boundId);
+            if (res.needPassword && this.recordPasswordFailure(connKey)) {
+              res.error = 'Terlalu banyak percobaan password salah. Tunggu 30 detik.';
+            }
+          }
+        }
+        reply(res);
         return;
       }
       if (msg.type === 'guest_leave_bc' && msg.code === this.room.code) {
-        this.handleHostGuestDisconnect(msg.guestId);
+        const boundId = this.bcTabBindings.get(msg.fromTab);
+        if (boundId) {
+          this.handleHostGuestDisconnect(boundId);
+        }
         return;
       }
     }
@@ -541,21 +705,39 @@ export class RoomClient {
     if (!room) return { error: 'Ruangan sudah ditutup.' };
 
     if (action === 'join_room') {
+      if (senderId === room.hostId) {
+        return { error: 'Tidak bisa mengambil alih kursi Host.' };
+      }
+      if (room.kickedIds?.has(senderId)) {
+        return { error: 'Kamu telah dikeluarkan dari ruangan ini oleh Host.' };
+      }
       const existing = room.players.find((p) => p.id === senderId && !p.isBot);
       if (existing) {
+        // Prevent active seat hijacking — require disconnected seat + valid cryptographic reconnectToken!
+        if (existing.connected) {
+          return { error: 'ID pemain ini sedang aktif bermain di ruangan.' };
+        }
+        if (!existing.reconnectToken || !constantTimeEqual(payload.reconnectToken, existing.reconnectToken)) {
+          return { error: 'Token sesi tidak valid — tidak bisa mengambil alih kursi pemain lain.' };
+        }
         existing.connected = true;
         if (payload.playerName && room.status === 'waiting') {
           existing.name = sanitizeName(payload.playerName, existing.name);
         }
         if (room.game) room.game.setPlayerConnection(senderId, true);
         this.emitHostRoom();
-        return { ok: true, room: this.serializeHostRoom(), reconnected: true };
+        return {
+          ok: true,
+          room: this.serializeHostRoom(),
+          reconnectToken: existing.reconnectToken,
+          reconnected: true,
+        };
       }
 
       if (room.status !== 'waiting') {
         return { error: 'Permainan di ruangan ini sudah dimulai.' };
       }
-      if (room.password && String(payload.password || '').trim() !== room.password) {
+      if (room.password && !constantTimeEqual(String(payload.password || '').trim(), room.password)) {
         return { error: 'Password ruangan salah.', needPassword: true };
       }
       if (room.players.length >= room.maxPlayers) {
@@ -564,21 +746,23 @@ export class RoomClient {
 
       const playerName = sanitizeName(payload.playerName, `Tamu ${room.players.length + 1}`);
       const characterId = this.pickUnusedCharacter(payload.characterId);
+      const reconnectToken = cryptoRandomToken(16);
       room.players.push({
         id: senderId,
         name: playerName,
         characterId,
         isBot: false,
         connected: true,
+        reconnectToken, // Secret token only returned to this guest, NEVER serialized to room state!
       });
       room.chat.push({
-        id: `sys-${Date.now()}-${Math.random()}`,
+        id: `sys-${Date.now()}-${cryptoRandomToken(3)}`,
         system: true,
         text: `${playerName} bergabung ke ruangan!`,
         time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
       });
       this.emitHostRoom();
-      return { ok: true, room: this.serializeHostRoom() };
+      return { ok: true, room: this.serializeHostRoom(), reconnectToken };
     }
 
     if (action === 'leave_room') {
@@ -638,6 +822,9 @@ export class RoomClient {
       const idx = room.players.findIndex((p) => p.id === targetId);
       if (idx === -1) return { error: 'Pemain tidak ditemukan.' };
       const [removed] = room.players.splice(idx, 1);
+      if (!removed.isBot) {
+        room.kickedIds?.add(removed.id);
+      }
       const connInfo = this.guestConns.get(removed.id);
       if (connInfo) {
         const kickMsg = { type: 'kicked', message: 'Kamu dikeluarkan dari ruangan oleh Host.' };
@@ -659,7 +846,7 @@ export class RoomClient {
         return { error: 'Minimal 2 pemain! Undang teman pakai kode room atau tambah Bot.' };
       }
       room.status = 'playing';
-      this.unregisterPublicRoom(room.code);
+      this.unregisterPublicRoom(room.code, room.hostSecret);
       room.game = new GameEngine(
         room,
         () => this.emitHostRoom(),
@@ -685,12 +872,18 @@ export class RoomClient {
     }
 
     if (action === 'send_chat') {
-      const player = room.players.find((p) => p.id === senderId);
+      const player = room.players.find((p) => p.id === senderId && !p.isBot);
       if (!player) return { error: 'Pemain tidak ditemukan.' };
-      const text = String(payload.text || '').trim().slice(0, 180);
+      const now = Date.now();
+      const prevTs = this.lastChatAt.get(senderId) || 0;
+      if (now - prevTs < CHAT_COOLDOWN_MS) {
+        return { error: 'Tunggu sebentar sebelum mengirim pesan lagi.' };
+      }
+      const text = sanitizeText(payload.text, 180);
       if (!text) return { error: 'Pesan kosong.' };
+      this.lastChatAt.set(senderId, now);
       const msg = {
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: `msg-${now}-${cryptoRandomToken(3)}`,
         playerId: player.id,
         playerName: player.name,
         characterId: player.characterId,
@@ -704,11 +897,13 @@ export class RoomClient {
       return { ok: true };
     }
 
-    // In-game actions delegated directly to GameEngine
+    // In-game actions delegated directly to GameEngine (strictly validated)
     if (!room.game) return { error: 'Permainan belum dimulai.' };
     switch (action) {
-      case 'game_roll':
-        return room.game.handleRoll(senderId, payload.mode);
+      case 'game_roll': {
+        const mode = ['acak', 'ganjil', 'genap'].includes(payload.mode) ? payload.mode : 'acak';
+        return room.game.handleRoll(senderId, mode);
+      }
       case 'game_pay_bail':
         return room.game.handlePayBail(senderId);
       case 'game_use_jail_card':
@@ -719,10 +914,16 @@ export class RoomClient {
         return room.game.handleUpgradeDecision(senderId, !!payload.upgrade);
       case 'game_ack_card':
         return room.game.handleAcknowledgeCard(senderId);
-      case 'game_upgrade_property':
-        return room.game.handleUpgradeProperty(senderId, Number(payload.tileId));
-      case 'game_sell_property':
-        return room.game.handleSellProperty(senderId, Number(payload.tileId));
+      case 'game_upgrade_property': {
+        const tid = Number(payload.tileId);
+        if (!Number.isInteger(tid)) return { error: 'ID petak tidak valid.' };
+        return room.game.handleUpgradeProperty(senderId, tid);
+      }
+      case 'game_sell_property': {
+        const tid = Number(payload.tileId);
+        if (!Number.isInteger(tid)) return { error: 'ID petak tidak valid.' };
+        return room.game.handleSellProperty(senderId, tid);
+      }
       case 'game_declare_bankruptcy':
         return room.game.handleDeclareBankruptcy(senderId);
       case 'game_propose_trade':
@@ -776,13 +977,26 @@ export class RoomClient {
         this.guestHostTabId = localFound;
         this.guestRoomCode = code;
         this.setNetStatus('online');
+        let storedToken = '';
+        try {
+          storedToken = sessionStorage.getItem(`konoha_reconn_${code}`) || '';
+        } catch {
+          // ignore
+        }
         const res = await this.sendAction('join_room', {
           guestId: this.guestId,
           playerName: payload.playerName,
           characterId: payload.characterId,
           password: payload.password,
+          reconnectToken: storedToken,
         });
-        if (!res.ok) {
+        if (res.ok && res.reconnectToken) {
+          try {
+            sessionStorage.setItem(`konoha_reconn_${code}`, res.reconnectToken);
+          } catch {
+            // ignore
+          }
+        } else if (!res.ok) {
           this.leaveRoom();
         }
         return res;
@@ -825,13 +1039,26 @@ export class RoomClient {
         }
       });
 
+      let storedToken = '';
+      try {
+        storedToken = sessionStorage.getItem(`konoha_reconn_${code}`) || '';
+      } catch {
+        // ignore
+      }
       const res = await this.sendAction('join_room', {
         guestId: this.guestId,
         playerName: payload.playerName,
         characterId: payload.characterId,
         password: payload.password,
+        reconnectToken: storedToken,
       });
-      if (!res.ok) {
+      if (res.ok && res.reconnectToken) {
+        try {
+          sessionStorage.setItem(`konoha_reconn_${code}`, res.reconnectToken);
+        } catch {
+          // ignore
+        }
+      } else if (!res.ok) {
         this.leaveRoom();
       }
       return res;
@@ -952,7 +1179,7 @@ export class RoomClient {
     }
 
     if (this.role === 'host' && this.room) {
-      this.unregisterPublicRoom(this.room.code);
+      this.unregisterPublicRoom(this.room.code, this.room.hostSecret);
       this.sendToAllGuests({ type: 'host_closed', code: this.room.code });
       if (this.room.game) {
         this.room.game.destroy();
@@ -965,6 +1192,9 @@ export class RoomClient {
         }
       }
       this.guestConns.clear();
+      this.bcTabBindings.clear();
+      this.failedPasswords.clear();
+      this.lastChatAt.clear();
       this.room = null;
     } else if (this.role === 'guest') {
       if (this.guestVia === 'bc' && this.bc && this.guestRoomCode) {

@@ -12,21 +12,24 @@ import {
 } from './boardData.js';
 import { pickDialogue } from './characters.js';
 import { drawRandomCard } from './cards.js';
+import { cryptoRandomInt, safeNonNegInt } from './security.js';
+
+const MAX_TRADES_PER_TURN = 3;
 
 function rollTwoDice(mode = 'acak') {
-  // mode: 'acak' | 'ganjil' | 'genap'
+  // mode: 'acak' | 'ganjil' | 'genap' — uses CSPRNG so dice cannot be predicted/manipulated
   if (mode === 'ganjil' || mode === 'genap') {
     const wantOdd = mode === 'ganjil';
-    for (let i = 0; i < 20; i++) {
-      const d1 = Math.floor(Math.random() * 6) + 1;
-      const d2 = Math.floor(Math.random() * 6) + 1;
+    for (let i = 0; i < 32; i++) {
+      const d1 = cryptoRandomInt(6) + 1;
+      const d2 = cryptoRandomInt(6) + 1;
       const isOdd = (d1 + d2) % 2 === 1;
       if (isOdd === wantOdd) {
         return [d1, d2];
       }
     }
   }
-  return [Math.floor(Math.random() * 6) + 1, Math.floor(Math.random() * 6) + 1];
+  return [cryptoRandomInt(6) + 1, cryptoRandomInt(6) + 1];
 }
 
 export class GameEngine {
@@ -45,12 +48,13 @@ export class GameEngine {
     this.phase = 'WAITING_ROLL'; // WAITING_ROLL | MOVING | ACTION_PENDING | DEBT_RESOLUTION | GAME_OVER
     this.kasNegara = INITIAL_KAS_NEGARA;
 
-    // Generate a brand-new randomized 40-tile 100%-Indonesian board for EVERY game!
+    // Generate a brand-new randomized 40-tile 100%-Indonesian board for EVERY game (frozen against tampering!)
     const randomBoard = generateRandomBoard();
     this.boardSeed = randomBoard.seed;
-    this.board = randomBoard.tiles;
+    this.board = Object.freeze(randomBoard.tiles.map((t) => Object.freeze({ ...t })));
 
     this.consecutiveDoubles = 0;
+    this.tradesThisTurn = 0;
     this.lastDice = [1, 1];
     this.lastRollMode = 'acak';
     this.pendingAction = null;
@@ -243,6 +247,8 @@ export class GameEngine {
     this.phase = 'WAITING_ROLL';
     this.pendingAction = null;
     this.activeCard = null;
+    this.pendingTrade = null;
+    this.tradesThisTurn = 0;
     this.statusText = player.inJail
       ? `${player.name} berada di Rutan KPK (sisa ${player.jailTurns} giliran)`
       : `${player.name} menunggu lemparan dadu`;
@@ -299,10 +305,11 @@ export class GameEngine {
   handlePayBail(playerId) {
     if (this.phase !== 'WAITING_ROLL') return { error: 'Bukan fase lempar dadu.' };
     const player = this.currentPlayer;
-    if (!player || player.id !== playerId) return { error: 'Bukan giliranmu.' };
+    if (!player || player.id !== playerId || player.bankrupt) return { error: 'Bukan giliranmu.' };
     if (!player.inJail) return { error: 'Kamu tidak sedang di Rutan KPK.' };
     if (player.money < JAIL_BAIL_AMOUNT) return { error: 'Uang tidak cukup untuk tebusan Rp1 jt.' };
 
+    this.pendingTrade = null;
     player.money -= JAIL_BAIL_AMOUNT;
     this.kasNegara += JAIL_BAIL_AMOUNT;
     player.inJail = false;
@@ -328,9 +335,10 @@ export class GameEngine {
   handleUseJailCard(playerId) {
     if (this.phase !== 'WAITING_ROLL') return { error: 'Bukan fase lempar dadu.' };
     const player = this.currentPlayer;
-    if (!player || player.id !== playerId) return { error: 'Bukan giliranmu.' };
+    if (!player || player.id !== playerId || player.bankrupt) return { error: 'Bukan giliranmu.' };
     if (!player.inJail || player.jailFreeCards <= 0) return { error: 'Tidak punya Kartu Orang Dalam.' };
 
+    this.pendingTrade = null;
     player.jailFreeCards -= 1;
     player.inJail = false;
     player.jailTurns = 0;
@@ -783,12 +791,15 @@ export class GameEngine {
   }
 
   settleDebt(player) {
+    if (this.phase !== 'DEBT_RESOLUTION') return;
     const amount = player.debtAmount;
     const creditorId = player.debtCreditorId;
     const toKas = player.debtToKas;
     const reason = this.pendingAction?.reason || 'kewajiban';
 
-    player.money -= amount;
+    // Immediately lock phase to prevent double-settle or post-settle sell/bankrupt race exploits!
+    this.phase = 'RESOLVING';
+    player.money = Math.max(0, player.money - amount);
     player.debtAmount = 0;
     player.debtCreditorId = null;
     player.debtToKas = false;
@@ -812,7 +823,10 @@ export class GameEngine {
   }
 
   declareBankruptcy(player, creditorId, toKas, reason) {
+    if (!player || player.bankrupt || this.phase === 'GAME_OVER') return;
     this.clearTimers();
+    this.phase = 'RESOLVING';
+    this.pendingTrade = null;
     const remainingCash = Math.max(0, player.money);
     player.money = 0;
     player.bankrupt = true;
@@ -865,12 +879,15 @@ export class GameEngine {
   }
 
   handleAcknowledgeCard(playerId) {
-    if (!this.pendingAction || this.pendingAction.type !== 'card_ack') return { error: 'Tidak ada kartu aktif.' };
+    if (this.phase !== 'ACTION_PENDING' || !this.pendingAction || this.pendingAction.type !== 'card_ack') {
+      return { error: 'Tidak ada kartu aktif.' };
+    }
     if (this.pendingAction.playerId !== playerId) return { error: 'Bukan giliran Anda.' };
 
     this.clearTimers();
     const { card, canRollAgain } = this.pendingAction;
     const player = this.getPlayer(playerId);
+    this.phase = 'RESOLVING';
     this.pendingAction = null;
     this.activeCard = null;
 
@@ -945,7 +962,7 @@ export class GameEngine {
       let collected = 0;
       for (const other of this.getActivePlayers()) {
         if (other.id === player.id) continue;
-        const paid = Math.min(other.money, eff.amount);
+        const paid = Math.max(0, Math.min(other.money, eff.amount));
         other.money -= paid;
         collected += paid;
         if (paid > 0) this.floatMoney(other.id, -paid);
@@ -1029,7 +1046,7 @@ export class GameEngine {
   }
 
   handleBuyDecision(playerId, buy) {
-    if (!this.pendingAction || this.pendingAction.type !== 'buy_property') {
+    if (this.phase !== 'ACTION_PENDING' || !this.pendingAction || this.pendingAction.type !== 'buy_property') {
       return { error: 'Tidak ada penawaran beli aktif.' };
     }
     if (this.pendingAction.playerId !== playerId) return { error: 'Bukan giliran Anda.' };
@@ -1038,6 +1055,7 @@ export class GameEngine {
     const { tileId, price, canRollAgain } = this.pendingAction;
     const player = this.getPlayer(playerId);
     const tile = getTileById(tileId, this.board);
+    this.phase = 'RESOLVING';
     this.pendingAction = null;
 
     if (buy && player.money >= price && !this.properties[tileId]) {
@@ -1059,13 +1077,14 @@ export class GameEngine {
   }
 
   handleUpgradeDecision(playerId, upgrade) {
-    if (!this.pendingAction || this.pendingAction.type !== 'upgrade_property') {
+    if (this.phase !== 'ACTION_PENDING' || !this.pendingAction || this.pendingAction.type !== 'upgrade_property') {
       return { error: 'Tidak ada penawaran upgrade aktif.' };
     }
     if (this.pendingAction.playerId !== playerId) return { error: 'Bukan giliran Anda.' };
 
     this.clearTimers();
     const { tileId, canRollAgain } = this.pendingAction;
+    this.phase = 'RESOLVING';
     this.pendingAction = null;
 
     if (upgrade) {
@@ -1080,8 +1099,16 @@ export class GameEngine {
   handleUpgradeProperty(playerId, tileId, silentTurnCheck = false) {
     const player = this.getPlayer(playerId);
     if (!player || player.bankrupt) return { error: 'Pemain tidak valid.' };
-    if (!silentTurnCheck && this.currentPlayer?.id !== playerId) {
-      return { error: 'Hanya bisa mengembangkan properti saat giliran Anda.' };
+    if (!silentTurnCheck) {
+      if (this.currentPlayer?.id !== playerId) {
+        return { error: 'Hanya bisa mengembangkan properti saat giliran Anda.' };
+      }
+      if (this.phase !== 'WAITING_ROLL') {
+        return { error: 'Upgrade manual hanya bisa dilakukan sebelum melempar dadu.' };
+      }
+    }
+    if (!Number.isInteger(tileId) || tileId < 0 || tileId >= TOTAL_TILES) {
+      return { error: 'ID petak tidak valid.' };
     }
 
     const tile = getTileById(tileId, this.board);
@@ -1091,6 +1118,7 @@ export class GameEngine {
     if (prop.level >= 3) return { error: 'Properti sudah di level maksimal (Landmark).' };
     if (player.money < tile.upgradeCost) return { error: 'Saldo tidak cukup untuk upgrade.' };
 
+    if (!silentTurnCheck) this.pendingTrade = null;
     player.money -= tile.upgradeCost;
     prop.level += 1;
     const levelNames = ['Tanah', 'Ruko', 'Gedung', 'Landmark'];
@@ -1105,6 +1133,7 @@ export class GameEngine {
   }
 
   sellPropertyInternal(player, tileId) {
+    if (!Number.isInteger(tileId) || tileId < 0 || tileId >= TOTAL_TILES) return 0;
     const prop = this.properties[tileId];
     if (!prop || prop.ownerId !== player.id) return 0;
     const tile = getTileById(tileId, this.board);
@@ -1124,9 +1153,17 @@ export class GameEngine {
     if (this.currentPlayer?.id !== playerId) {
       return { error: 'Hanya bisa menjual properti saat giliran Anda.' };
     }
+    if (this.phase !== 'WAITING_ROLL' && this.phase !== 'DEBT_RESOLUTION') {
+      return { error: 'Tidak bisa menjual properti pada fase ini.' };
+    }
+    if (!Number.isInteger(tileId) || tileId < 0 || tileId >= TOTAL_TILES) {
+      return { error: 'ID petak tidak valid.' };
+    }
     const prop = this.properties[tileId];
     if (!prop || prop.ownerId !== playerId) return { error: 'Bukan pemilik properti ini.' };
 
+    // Cancel any open trade offer to prevent asset-disappearing trade exploits!
+    this.pendingTrade = null;
     this.sellPropertyInternal(player, tileId);
 
     // If resolving debt and now has enough money, settle immediately!
@@ -1140,26 +1177,45 @@ export class GameEngine {
     return { ok: true };
   }
 
-  handleProposeTrade(fromId, { toId, offerTiles = [], requestTiles = [], offerMoney = 0, requestMoney = 0 }) {
+  handleProposeTrade(fromId, rawPayload = {}) {
     if (this.phase !== 'WAITING_ROLL') {
       return { error: 'Dagang hanya bisa dilakukan sebelum melempar dadu pada giliran Anda.' };
     }
     if (this.currentPlayer?.id !== fromId) return { error: 'Hanya bisa mengajukan dagang saat giliran Anda.' };
     if (this.pendingTrade) return { error: 'Masih ada penawaran dagang yang sedang diproses.' };
+    if (this.tradesThisTurn >= MAX_TRADES_PER_TURN) {
+      return { error: `Maksimal ${MAX_TRADES_PER_TURN} tawaran dagang per giliran.` };
+    }
 
+    const { toId, offerTiles = [], requestTiles = [], offerMoney = 0, requestMoney = 0 } = rawPayload || {};
     const fromPlayer = this.getPlayer(fromId);
     const toPlayer = this.getPlayer(toId);
-    if (!fromPlayer || !toPlayer || toPlayer.bankrupt || fromId === toId) {
+    if (!fromPlayer || fromPlayer.bankrupt || !toPlayer || toPlayer.bankrupt || fromId === toId) {
       return { error: 'Target pemain tidak valid.' };
     }
 
-    const safeOfferMoney = Math.max(0, Math.floor(Number(offerMoney) || 0));
-    const safeRequestMoney = Math.max(0, Math.floor(Number(requestMoney) || 0));
-    if (safeOfferMoney > fromPlayer.money) return { error: 'Uang tawaran melebihi saldo Anda.' };
-    if (safeRequestMoney > toPlayer.money) return { error: 'Uang permintaan melebihi saldo lawan.' };
+    const safeOfferMoney = safeNonNegInt(offerMoney, fromPlayer.money);
+    const safeRequestMoney = safeNonNegInt(requestMoney, toPlayer.money);
+    if (Number(offerMoney) > fromPlayer.money) return { error: 'Uang tawaran melebihi saldo Anda.' };
+    if (Number(requestMoney) > toPlayer.money) return { error: 'Uang permintaan melebihi saldo lawan.' };
 
-    const validOfferTiles = offerTiles.filter((tid) => this.properties[tid]?.ownerId === fromId);
-    const validRequestTiles = requestTiles.filter((tid) => this.properties[tid]?.ownerId === toId);
+    // Strict array validation + deduplication via Set (blocks duplicate-tile infinite money exploit!)
+    const rawOfferArr = Array.isArray(offerTiles) ? offerTiles : [];
+    const rawRequestArr = Array.isArray(requestTiles) ? requestTiles : [];
+    const validOfferTiles = Array.from(
+      new Set(
+        rawOfferArr
+          .map((x) => Number(x))
+          .filter((tid) => Number.isInteger(tid) && tid >= 0 && tid < TOTAL_TILES && this.properties[tid]?.ownerId === fromId)
+      )
+    );
+    const validRequestTiles = Array.from(
+      new Set(
+        rawRequestArr
+          .map((x) => Number(x))
+          .filter((tid) => Number.isInteger(tid) && tid >= 0 && tid < TOTAL_TILES && this.properties[tid]?.ownerId === toId)
+      )
+    );
 
     if (
       validOfferTiles.length === 0 &&
@@ -1169,6 +1225,8 @@ export class GameEngine {
     ) {
       return { error: 'Isi minimal satu properti atau nominal uang.' };
     }
+
+    this.tradesThisTurn += 1;
 
     const trade = {
       id: `tr_${Date.now()}`,
@@ -1182,7 +1240,7 @@ export class GameEngine {
       requestMoney: safeRequestMoney,
     };
 
-    // Bot responds automatically based on fair value
+    // Bot anti-farming valuation: must receive at least 105% of fair value & refuses pure cash begging!
     if (toPlayer.isBot || !toPlayer.connected) {
       const valueOf = (tids, money) =>
         money +
@@ -1195,7 +1253,7 @@ export class GameEngine {
       const botGets = valueOf(validOfferTiles, safeOfferMoney);
       const botGives = valueOf(validRequestTiles, safeRequestMoney);
 
-      if (botGets >= botGives * 0.95) {
+      if (botGives > 0 && botGets >= Math.ceil(botGives * 1.05)) {
         this.executeTrade(trade);
         this.speak(toPlayer, 'buy', 'Deal! Penawaran yang menarik nih!');
       } else {
@@ -1213,7 +1271,7 @@ export class GameEngine {
   }
 
   handleRespondTrade(playerId, accept) {
-    if (!this.pendingTrade) return { error: 'Tidak ada tawaran dagang.' };
+    if (this.phase !== 'WAITING_ROLL' || !this.pendingTrade) return { error: 'Tidak ada tawaran dagang.' };
     if (this.pendingTrade.toId !== playerId) return { error: 'Tawaran ini bukan untuk Anda.' };
 
     const trade = this.pendingTrade;
@@ -1225,33 +1283,43 @@ export class GameEngine {
       return { ok: true };
     }
 
-    this.executeTrade(trade);
+    const ok = this.executeTrade(trade);
+    if (!ok) {
+      this.addLog(`⚠️ Transaksi dagang dibatalkan karena saldo/kepemilikan aset berubah.`, 'warn');
+      this.broadcast();
+      return { error: 'Transaksi dibatalkan karena aset/saldo berubah.' };
+    }
     return { ok: true };
   }
 
   executeTrade(trade) {
     const fromP = this.getPlayer(trade.fromId);
     const toP = this.getPlayer(trade.toId);
-    if (!fromP || !toP) return;
-    if (fromP.money < trade.offerMoney || toP.money < trade.requestMoney) return;
+    if (!fromP || !toP || fromP.bankrupt || toP.bankrupt) return false;
+    if (fromP.money < trade.offerMoney || toP.money < trade.requestMoney) return false;
+
+    // Atomic precondition verification: ALL promised tiles must still belong to their owners!
+    for (const tid of trade.offerTiles) {
+      if (this.properties[tid]?.ownerId !== fromP.id) return false;
+    }
+    for (const tid of trade.requestTiles) {
+      if (this.properties[tid]?.ownerId !== toP.id) return false;
+    }
 
     fromP.money = fromP.money - trade.offerMoney + trade.requestMoney;
     toP.money = toP.money - trade.requestMoney + trade.offerMoney;
 
     for (const tid of trade.offerTiles) {
-      if (this.properties[tid]?.ownerId === fromP.id) {
-        this.properties[tid].ownerId = toP.id;
-      }
+      this.properties[tid].ownerId = toP.id;
     }
     for (const tid of trade.requestTiles) {
-      if (this.properties[tid]?.ownerId === toP.id) {
-        this.properties[tid].ownerId = fromP.id;
-      }
+      this.properties[tid].ownerId = fromP.id;
     }
 
     this.emitEvent('sfx', { sound: 'buy' });
     this.addLog(`🤝 DEAL! ${fromP.name} dan ${toP.name} menyelesaikan transaksi dagang!`, 'buy');
     this.broadcast();
+    return true;
   }
 
   endTurn(canRollAgain) {

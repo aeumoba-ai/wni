@@ -1,33 +1,52 @@
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import roomsHandler from '../api/rooms.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ROOT_DIR = path.resolve(__dirname, '..');
-const DIST_DIR = path.join(ROOT_DIR, 'dist');
+const distDir = path.resolve(__dirname, '../dist');
 
 const app = express();
-app.use(express.json());
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
-// Mount the exact same serverless handler used by Vercel at /api/rooms
-app.all('/api/rooms', (req, res) => roomsHandler(req, res));
+// Strict JSON body limit to block oversized payload DoS
+app.use(express.json({ limit: '16kb' }));
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mode: 'vercel-ready-guest-p2p' });
+// Safe security headers (compatible with cross-origin live previews & WebRTC)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
 });
 
-if (fs.existsSync(DIST_DIR)) {
-  app.use(express.static(DIST_DIR));
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(DIST_DIR, 'index.html'));
-  });
-}
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, mode: 'vercel-ready-guest-p2p', security: 'hardened' });
+});
+
+app.all('/api/rooms', (req, res) => roomsHandler(req, res));
+
+// Reject malformed JSON cleanly without leaking stack traces
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    res.status(413).json({ error: 'Payload terlalu besar.' });
+    return;
+  }
+  if (err instanceof SyntaxError && 'body' in err) {
+    res.status(400).json({ error: 'Format JSON tidak valid.' });
+    return;
+  }
+  next(err);
+});
+
+app.use(express.static(distDir));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distDir, 'index.html'));
+});
 
 const PORT = Number(process.env.PORT) || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Monopoli Negeri Konoha (Vercel-Ready Guest P2P) listening on http://0.0.0.0:${PORT}`);
+  console.log(`Monopoli Negeri Konoha server listening on http://0.0.0.0:${PORT}`);
 });
