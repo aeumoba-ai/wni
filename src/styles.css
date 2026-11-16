@@ -2117,31 +2117,48 @@ body,
   gap: 8px;
 }
 
-/* FLOATING TOP-RIGHT SETTINGS PILL (LOBBY & WAITING ROOM) */
-.floating-settings-btn {
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 45;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 13px;
-  border-radius: 999px;
-  border: 2px solid #2a1d14;
-  background: linear-gradient(180deg, #e7c99f 0%, #cfa470 100%);
-  color: #2a1d14;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
-  font-size: 13px;
-  font-weight: 800;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
-  cursor: pointer;
-  transition: transform 0.12s ease, filter 0.12s ease;
+/* MAIN MENU HEADER WITH UNIFIED SETTING ICON */
+.lobby-top-bar {
+  position: relative;
+  padding: 0 40px;
+  text-align: center;
+  margin-bottom: 4px;
 }
 
-.floating-settings-btn:hover {
+.lobby-settings-icon-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 2px solid #2a1d14;
+  background: linear-gradient(180deg, #f3dcba 0%, #d8ae78 100%);
+  color: #2a1d14;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  box-shadow: 0 2px 0 #2a1d14;
+  transition: transform 0.1s ease, filter 0.1s ease;
+}
+
+.lobby-settings-icon-btn:hover {
   transform: translateY(-1px);
-  filter: brightness(1.04);
+  filter: brightness(1.05);
+}
+
+.settings-scroll-body {
+  max-height: 66vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.settings-room-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 2px dashed rgba(42, 29, 20, 0.22);
 }
 
 .lobby-bottom-actions {

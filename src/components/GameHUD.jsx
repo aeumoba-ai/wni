@@ -2,8 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   MessageCircle,
   ScrollText,
-  Volume2,
-  VolumeX,
   Settings,
   Briefcase,
   ArrowLeftRight,
@@ -14,7 +12,6 @@ import {
   Camera,
   KeyRound,
   ShieldAlert,
-  Music,
 } from 'lucide-react';
 import { formatRupiah, formatShortRupiah, JAIL_BAIL_AMOUNT } from '../../shared/boardData.js';
 import { getCharacterById } from '../../shared/characters.js';
@@ -27,14 +24,9 @@ export default function GameHUD({
   dialogues,
   moneyDeltas,
   unreadChat,
-  muted,
-  bgmOn,
-  onToggleMute,
-  onToggleBgm,
   onResetCamera,
   onOpenChat,
   onOpenLog,
-  onOpenRoomInfo,
   onOpenSettings,
   onOpenPorto,
   onOpenTrade,
@@ -191,7 +183,7 @@ export default function GameHUD({
             </div>
           </div>
 
-          <button className="room-code-chip" onClick={onOpenRoomInfo} title="Kode Room & Link Invite">
+          <button className="room-code-chip" onClick={onOpenSettings} title="Kode Room & Pengaturan">
             <KeyRound size={13} />
             <span>{room.code}</span>
           </button>
@@ -204,20 +196,10 @@ export default function GameHUD({
             <button className="hud-circle-btn" onClick={onOpenLog} title="Riwayat Permainan">
               <ScrollText size={17} />
             </button>
-            <button
-              className={`hud-circle-btn ${bgmOn ? 'on' : ''}`}
-              onClick={onToggleBgm}
-              title={bgmOn ? 'Matikan Musik Latar' : 'Nyalakan Musik Latar'}
-            >
-              <Music size={17} />
-            </button>
-            <button className="hud-circle-btn" onClick={onToggleMute} title={muted ? 'Nyalakan Suara' : 'Bisukan'}>
-              {muted ? <VolumeX size={17} /> : <Volume2 size={17} />}
-            </button>
             <button className="hud-circle-btn" onClick={onResetCamera} title="Reset Kamera">
               <Camera size={17} />
             </button>
-            <button className="hud-circle-btn" onClick={onOpenSettings} title="Pengaturan Suara & Game">
+            <button className="hud-circle-btn" onClick={onOpenSettings} title="Pengaturan (Suara, Musik & Room)">
               <Settings size={17} />
             </button>
           </div>

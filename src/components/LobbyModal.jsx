@@ -129,7 +129,18 @@ export default function LobbyModal({
   return (
     <div className="lobby-overlay">
       <div className="kraft-card lobby-card">
-        <h1 className="game-logo">MONOPOLI NEGERI KONOHA</h1>
+        <div className="lobby-top-bar">
+          <h1 className="game-logo" style={{ margin: 0 }}>MONOPOLI NEGERI KONOHA</h1>
+          <button
+            type="button"
+            className="lobby-settings-icon-btn"
+            onClick={onOpenSettings}
+            title="Pengaturan Suara & Musik"
+            aria-label="Pengaturan"
+          >
+            <Settings size={18} />
+          </button>
+        </div>
         <p className="lobby-subtitle">
           Main online bareng teman atau orang asing. Setiap pemain mulai dengan Rp15.000.000.
         </p>

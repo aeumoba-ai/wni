@@ -15,6 +15,7 @@ import {
   Lock,
   Globe,
   Wifi,
+  Settings,
 } from 'lucide-react';
 import { CHARACTERS, getCharacterById } from '../../shared/characters.js';
 import AvatarIcon from './AvatarIcon.jsx';
@@ -30,6 +31,7 @@ export default function RoomWaitingModal({
   onStartGame,
   onLeaveRoom,
   onSendChat,
+  onOpenSettings,
   error,
 }) {
   const [copiedCode, setCopiedCode] = useState(false);
@@ -90,10 +92,16 @@ export default function RoomWaitingModal({
             </div>
             <h2 className="waiting-title">{room.name}</h2>
           </div>
-          <button className="btn-danger-sm" onClick={onLeaveRoom}>
-            <LogOut size={15} />
-            <span>Keluar</span>
-          </button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button type="button" className="btn-tan" onClick={onOpenSettings} title="Pengaturan Suara & Musik">
+              <Settings size={15} />
+              <span>Setting</span>
+            </button>
+            <button className="btn-danger-sm" onClick={onLeaveRoom}>
+              <LogOut size={15} />
+              <span>Keluar</span>
+            </button>
+          </div>
         </div>
 
         {/* PROMINENT ROOM CODE INVITE BANNER */}

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { X, Settings } from 'lucide-react';
+import { X } from 'lucide-react';
 import { COLOR_GROUPS, formatShortRupiah, getTileById } from '../shared/boardData.js';
 import { RoomClient } from './net/RoomClient.js';
 import { Scene3D } from './game/Scene3D.js';
@@ -12,7 +12,7 @@ import GameHUD from './components/GameHUD.jsx';
 import ActionModals from './components/ActionModals.jsx';
 import PortoModal from './components/PortoModal.jsx';
 import TradeModal, { IncomingTradeModal } from './components/TradeModal.jsx';
-import { ChatDrawer, LogDrawer, RoomInfoModal } from './components/SideDrawers.jsx';
+import { ChatDrawer, LogDrawer } from './components/SideDrawers.jsx';
 
 function getOrCreateGuestId() {
   let id = sessionStorage.getItem('konoha_guest_id');
@@ -51,13 +51,10 @@ export default function App() {
   const [showTrade, setShowTrade] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const [showRoomInfo, setShowRoomInfo] = useState(false);
   const [selectedTileId, setSelectedTileId] = useState(null);
   const [unreadChat, setUnreadChat] = useState(0);
 
   const [audioSettings, setAudioSettings] = useState(() => soundEngine.getSettings());
-  const muted = audioSettings.muted;
-  const bgmOn = audioSettings.bgmOn;
   const [dialogues, setDialogues] = useState({});
   const [moneyDeltas, setMoneyDeltas] = useState({});
 
@@ -235,7 +232,6 @@ export default function App() {
     setShowTrade(false);
     setShowChat(false);
     setShowLog(false);
-    setShowRoomInfo(false);
   };
 
   const handleToggleMute = () => {
@@ -292,18 +288,6 @@ export default function App() {
 
       {toast && <div className="global-toast">{toast}</div>}
 
-      {!isPlaying && (
-        <button
-          type="button"
-          className="floating-settings-btn"
-          onClick={() => setShowSettings(true)}
-          title="Pengaturan Suara"
-        >
-          <Settings size={16} />
-          <span>Pengaturan</span>
-        </button>
-      )}
-
       {!room && (
         <LobbyModal
           playerName={playerName}
@@ -334,6 +318,7 @@ export default function App() {
           onStartGame={() => emitAction('start_game')}
           onLeaveRoom={handleLeaveRoom}
           onSendChat={(text) => emitAction('send_chat', { text })}
+          onOpenSettings={() => setShowSettings(true)}
           error={error}
         />
       )}
@@ -347,10 +332,6 @@ export default function App() {
             dialogues={dialogues}
             moneyDeltas={moneyDeltas}
             unreadChat={unreadChat}
-            muted={muted}
-            bgmOn={bgmOn}
-            onToggleMute={handleToggleMute}
-            onToggleBgm={handleToggleBgm}
             onResetCamera={() => sceneRef.current?.resetCamera()}
             onOpenChat={() => {
               setShowLog(false);
@@ -361,7 +342,6 @@ export default function App() {
               setShowChat(false);
               setShowLog((v) => !v);
             }}
-            onOpenRoomInfo={() => setShowRoomInfo(true)}
             onOpenSettings={() => setShowSettings(true)}
             onOpenPorto={() => setShowPorto(true)}
             onOpenTrade={() => setShowTrade(true)}
@@ -421,14 +401,6 @@ export default function App() {
             open={showLog}
             logs={room.game.logs || []}
             onClose={() => setShowLog(false)}
-          />
-
-          <RoomInfoModal
-            open={showRoomInfo}
-            room={room}
-            onClose={() => setShowRoomInfo(false)}
-            onLeave={handleLeaveRoom}
-            onOpenHowToPlay={() => setShowHowToPlay(true)}
           />
 
           {selectedTileId !== null && (() => {
@@ -496,15 +468,15 @@ export default function App() {
 
       <SettingsModal
         open={showSettings}
+        room={room}
         audioSettings={audioSettings}
         onUpdateVolume={handleUpdateVolume}
         onToggleMute={handleToggleMute}
         onToggleBgm={handleToggleBgm}
         onApplyPreset={handleApplyAudioPreset}
         onResetAudio={handleResetAudio}
-        inRoom={Boolean(isPlaying)}
-        onOpenRoomInfo={() => setShowRoomInfo(true)}
         onOpenHowToPlay={() => setShowHowToPlay(true)}
+        onLeaveRoom={handleLeaveRoom}
         onClose={() => setShowSettings(false)}
       />
 
