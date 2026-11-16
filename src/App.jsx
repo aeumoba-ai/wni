@@ -387,8 +387,9 @@ export default function App() {
           onJoinRoom={handleJoinRoom}
           onPreviewRoom={handlePreviewRoom}
           onListPublicRooms={handleListPublicRooms}
-          onOpenHowToPlay={() => setShowHowToPlay(true)}
           onOpenSettings={() => setShowSettings(true)}
+          smoothAnimation={smoothAnimation}
+          audioMaster={audioSettings.muted ? 0 : audioSettings.master}
           busy={busy}
           error={error}
         />

@@ -183,10 +183,13 @@ export default function GameHUD({
             </div>
           </div>
 
-          <button className="room-code-chip" onClick={onOpenSettings} title="Kode Room & Pengaturan">
+          <div
+            className="room-code-chip is-static"
+            title={`Kode room ${room.code} — buka tombol PENGATURAN untuk menyalin kode & link invite`}
+          >
             <KeyRound size={13} />
             <span>{room.code}</span>
-          </button>
+          </div>
 
           <div className="hud-icon-cluster">
             <button className="hud-circle-btn" onClick={onOpenChat} title="Obrolan">
@@ -199,8 +202,14 @@ export default function GameHUD({
             <button className="hud-circle-btn" onClick={onResetCamera} title="Reset Kamera">
               <Camera size={17} />
             </button>
-            <button className="hud-circle-btn" onClick={onOpenSettings} title="Pengaturan (Suara, Musik & Room)">
+            <button
+              className="hud-circle-btn hud-settings-btn"
+              onClick={onOpenSettings}
+              title="PENGATURAN — semua pengaturan: suara, animasi & cutscene, info ruangan, cara main"
+              aria-label="Buka semua Pengaturan"
+            >
               <Settings size={17} />
+              <span className="hud-settings-label">PENGATURAN</span>
             </button>
           </div>
         </div>

@@ -3215,3 +3215,204 @@ body,
   font-family: var(--font-body);
 }
 
+
+/* ==================== SINGLE, UNIFIED "PENGATURAN" ENTRY POINT ====================
+   Semua pengaturan (suara/audio, smooth animation & cutscene, info ruangan,
+   keamanan, cara main) dibuka lewat SATU tombol Pengaturan di Menu Utama,
+   Ruang Tunggu, dan HUD. Tidak ada tombol pengaturan terpisah di luar modal ini.
+   ================================================================================ */
+
+.lobby-top-bar {
+  padding: 0 8px;
+}
+
+.main-settings-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  text-align: left;
+  padding: 10px 12px;
+  margin: 0 0 13px;
+  border: 2.5px solid #2a1d14;
+  border-radius: 13px;
+  background: linear-gradient(180deg, #fff5dc 0%, #ecd0a9 100%);
+  color: #2a1d14;
+  cursor: pointer;
+  box-shadow: 0 4px 0 #2a1d14, inset 0 2px 0 rgba(255, 255, 255, 0.65);
+  transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
+}
+
+.main-settings-btn:hover {
+  filter: brightness(1.035);
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 #2a1d14, inset 0 2px 0 rgba(255, 255, 255, 0.65);
+}
+
+.main-settings-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #2a1d14;
+}
+
+.main-settings-ic {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  border: 2px solid #2a1d14;
+  background: var(--navy);
+  color: #fde047;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.16);
+}
+
+.main-settings-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.main-settings-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 17px;
+  letter-spacing: 0.3px;
+  line-height: 1.1;
+}
+
+.main-settings-sub {
+  font-family: var(--font-body);
+  font-size: 10.8px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #5a422d;
+}
+
+.main-settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.main-settings-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(42, 29, 20, 0.45);
+  background: rgba(255, 255, 255, 0.6);
+  font-family: var(--font-heading);
+  font-size: 9.6px;
+  font-weight: 800;
+  color: #3a2719;
+  white-space: nowrap;
+}
+
+.main-settings-chip.on {
+  background: #16a34a;
+  border-color: #14532d;
+  color: #ffffff;
+}
+
+.main-settings-chevron {
+  flex-shrink: 0;
+  color: #2a1d14;
+  opacity: 0.75;
+}
+
+.waiting-settings-btn {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  border-color: #0b1625;
+  background: linear-gradient(180deg, #f3dcba 0%, #d8ae78 100%);
+  color: #2a1d14;
+  text-shadow: none;
+  box-shadow: 0 3px 0 #0b1625;
+}
+
+.settings-modal-footer {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.settings-modal-footer .btn-green {
+  font-size: 14px;
+  padding: 9px 12px;
+}
+
+.room-code-chip.is-static {
+  cursor: default;
+  user-select: text;
+}
+
+.hud-settings-btn {
+  width: auto;
+  height: 38px;
+  padding: 0 11px;
+  gap: 6px;
+  border-radius: 11px;
+  border: 2px solid #0b1625;
+  background: linear-gradient(180deg, #f3dcba 0%, #d8ae78 100%);
+  color: #2a1d14;
+  box-shadow: 0 3px 0 #0b1625;
+}
+
+.hud-settings-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.hud-settings-label {
+  font-family: var(--font-heading);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.35px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .main-settings-sub {
+    font-size: 10px;
+  }
+
+  .main-settings-chip {
+    font-size: 9px;
+  }
+
+  .hud-settings-btn {
+    width: 38px;
+    padding: 0;
+    border-radius: 50%;
+  }
+
+  .hud-settings-label {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .main-settings-btn {
+    gap: 8px;
+    padding: 9px;
+  }
+
+  .main-settings-ic {
+    width: 35px;
+    height: 35px;
+  }
+
+  .main-settings-chips .main-settings-chip:nth-child(3) {
+    display: none;
+  }
+}

@@ -93,9 +93,15 @@ export default function RoomWaitingModal({
             <h2 className="waiting-title">{room.name}</h2>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <button type="button" className="btn-tan" onClick={onOpenSettings} title="Pengaturan Suara & Musik">
+            <button
+              type="button"
+              className="btn-tan waiting-settings-btn"
+              onClick={onOpenSettings}
+              title="Semua pengaturan: suara, animasi & cutscene, info ruangan, cara main"
+              aria-label="Buka semua Pengaturan"
+            >
               <Settings size={15} />
-              <span>Setting</span>
+              <span>PENGATURAN</span>
             </button>
             <button className="btn-danger-sm" onClick={onLeaveRoom}>
               <LogOut size={15} />

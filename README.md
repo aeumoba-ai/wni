@@ -5,6 +5,7 @@ Game monopoli online 3D dengan sentuhan lokal Indonesia yang dirancang **100% Gu
 ## Fitur Utama
 
 - **100% Guest-Only & Anonim**: Langsung masuk lobi tanpa login/daftar. Cukup isi nama panggilan (atau acak nama WNI) dan pilih 1 dari 10 karakter WNI (*Pak Pejabat, Pak Tentara, Bu RT, Pak Haji, Mbak Hijab, Bang Ojol, Mas Startup, Pak Petani, Anak Tongkrongan, Kang Parkir*).
+- **Satu Tombol PENGATURAN (Terpadu)**: Tombol **PENGATURAN** yang jelas tersedia di **Menu Utama**, **Ruang Tunggu**, dan **HUD**. Semua pengaturan ada di dalam satu modal yang sama — tab `AUDIO` (volume 0–100% untuk master/musik/klik/SFX), tab `ANIMASI` (Smooth Animation ON/OFF + cutscene, default OFF), tab `RUANGAN` (kode/link invite, keamanan), serta **Cara Main**. Tidak ada tombol pengaturan yang terpisah-pisah.
 - **Multiplayer Online di Vercel (Zero-Config!)**:
   - Menggunakan arsitektur **Host-Authoritative WebRTC P2P (`PeerJS`)** berbasis **Kode Room 6 karakter** (`KNH482`) sehingga bisa langsung main lintas perangkat di Vercel Static/Hobby plan tanpa server WebSocket tambahan.
   - Dilengkapi **BroadcastChannel** untuk testing multi-tab lokal secara instan, serta **Vercel Serverless Function (`/api/rooms`)** untuk daftar ruangan publik (otomatis mendukung Upstash Redis / Vercel KV bila env var diisi, dan tetap berjalan dengan fallback memori bila tanpa konfigurasi).

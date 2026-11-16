@@ -219,19 +219,6 @@ export default function SettingsModal({
               </div>
 
               <div className="settings-footer-actions" style={{ marginTop: 10 }}>
-                {onOpenHowToPlay && (
-                  <button
-                    type="button"
-                    className="btn-tan"
-                    onClick={() => {
-                      onClose();
-                      onOpenHowToPlay();
-                    }}
-                  >
-                    <BookOpen size={14} />
-                    <span>Cara Main</span>
-                  </button>
-                )}
                 <button type="button" className="btn-tan" onClick={() => setActiveTab('anim')}>
                   <Clapperboard size={14} />
                   <span>Smooth: {smoothAnimation ? 'ON' : 'OFF'}</span>
@@ -383,20 +370,6 @@ export default function SettingsModal({
                   <RotateCcw size={14} />
                   <span>Reset Suara</span>
                 </button>
-
-                {!room && onOpenHowToPlay && (
-                  <button
-                    type="button"
-                    className="btn-tan"
-                    onClick={() => {
-                      onClose();
-                      onOpenHowToPlay();
-                    }}
-                  >
-                    <BookOpen size={14} />
-                    <span>Cara Main</span>
-                  </button>
-                )}
               </div>
             </div>
           )}
@@ -495,9 +468,25 @@ export default function SettingsModal({
           )}
         </div>
 
-        <button type="button" className="btn-green full-width" onClick={onClose} style={{ marginTop: 10 }}>
-          SIMPAN &amp; TUTUP
-        </button>
+        {/* Semua kendali & bantuan terkumpul di satu modal — tidak ada tombol terpisah di luar Setting */}
+        <div className="settings-modal-footer">
+          {onOpenHowToPlay && (
+            <button
+              type="button"
+              className="btn-tan"
+              onClick={() => {
+                onClose();
+                onOpenHowToPlay();
+              }}
+            >
+              <BookOpen size={14} />
+              <span>Cara Main</span>
+            </button>
+          )}
+          <button type="button" className="btn-green flex-1" onClick={onClose}>
+            SIMPAN &amp; TUTUP
+          </button>
+        </div>
       </div>
     </div>
   );

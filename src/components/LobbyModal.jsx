@@ -5,11 +5,15 @@ import {
   Search,
   Lock,
   Globe,
-  BookOpen,
   Shuffle,
   RefreshCw,
   ArrowRight,
   Settings,
+  SlidersHorizontal,
+  ChevronRight,
+  Volume2,
+  Clapperboard,
+  BookOpen,
 } from 'lucide-react';
 import { CHARACTERS, RANDOM_GUEST_NAMES, getCharacterById } from '../../shared/characters.js';
 import AvatarIcon from './AvatarIcon.jsx';
@@ -24,8 +28,9 @@ export default function LobbyModal({
   onJoinRoom,
   onPreviewRoom,
   onListPublicRooms,
-  onOpenHowToPlay,
   onOpenSettings,
+  smoothAnimation = false,
+  audioMaster = 0,
   busy,
   error,
 }) {
@@ -131,19 +136,44 @@ export default function LobbyModal({
       <div className="kraft-card lobby-card">
         <div className="lobby-top-bar">
           <h1 className="game-logo" style={{ margin: 0 }}>MONOPOLI NEGERI KONOHA</h1>
-          <button
-            type="button"
-            className="lobby-settings-icon-btn"
-            onClick={onOpenSettings}
-            title="Pengaturan Suara & Musik"
-            aria-label="Pengaturan"
-          >
-            <Settings size={18} />
-          </button>
         </div>
         <p className="lobby-subtitle">
           Main online bareng teman atau orang asing. Setiap pemain mulai dengan Rp15.000.000.
         </p>
+
+        {/* SATU-SATUNYA TOMBOL PENGATURAN DI MENU UTAMA: semua pengaturan ada di sini */}
+        <button
+          type="button"
+          className="main-settings-btn"
+          onClick={onOpenSettings}
+          title="Buka semua pengaturan: suara, animasi, cutscene, ruangan & cara main"
+          aria-label="Buka Pengaturan (semua pengaturan)"
+        >
+          <span className="main-settings-ic">
+            <SlidersHorizontal size={20} />
+          </span>
+          <span className="main-settings-copy">
+            <span className="main-settings-title">
+              <Settings size={15} />
+              PENGATURAN
+            </span>
+            <span className="main-settings-sub">
+              Semua pengaturan ada di sini — suara, animasi &amp; cutscene, info ruangan, cara main
+            </span>
+            <span className="main-settings-chips">
+              <span className="main-settings-chip">
+                <Volume2 size={11} /> Suara {audioMaster}%
+              </span>
+              <span className={`main-settings-chip ${smoothAnimation ? 'on' : ''}`}>
+                <Clapperboard size={11} /> Animasi {smoothAnimation ? 'ON' : 'OFF'}
+              </span>
+              <span className="main-settings-chip">
+                <BookOpen size={11} /> Cara Main
+              </span>
+            </span>
+          </span>
+          <ChevronRight size={20} className="main-settings-chevron" />
+        </button>
 
         {/* Nama Pemain (Guest Only / Anonim) */}
         <div className="field-block">
@@ -402,15 +432,6 @@ export default function LobbyModal({
           </div>
         )}
 
-        <button
-          type="button"
-          className="btn-tan full-width"
-          style={{ marginTop: 10 }}
-          onClick={onOpenHowToPlay}
-        >
-          <BookOpen size={15} />
-          <span>CARA MAIN</span>
-        </button>
       </div>
     </div>
   );
