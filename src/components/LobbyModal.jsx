@@ -14,6 +14,7 @@ import {
   Volume2,
   Clapperboard,
   BookOpen,
+  Monitor,
 } from 'lucide-react';
 import { CHARACTERS, RANDOM_GUEST_NAMES, getCharacterById } from '../../shared/characters.js';
 import AvatarIcon from './AvatarIcon.jsx';
@@ -31,6 +32,7 @@ export default function LobbyModal({
   onOpenSettings,
   smoothAnimation = false,
   audioMaster = 0,
+  graphicsPreset = 'balanced',
   busy,
   error,
 }) {
@@ -166,6 +168,9 @@ export default function LobbyModal({
               </span>
               <span className={`main-settings-chip ${smoothAnimation ? 'on' : ''}`}>
                 <Clapperboard size={11} /> Animasi {smoothAnimation ? 'ON' : 'OFF'}
+              </span>
+              <span className="main-settings-chip">
+                <Monitor size={11} /> Grafik {graphicsPreset === 'high' ? 'TINGGI' : graphicsPreset === 'low' ? 'RINGAN' : graphicsPreset === 'custom' ? 'KUSTOM' : 'SEIMBANG'}
               </span>
               <span className="main-settings-chip">
                 <BookOpen size={11} /> Cara Main

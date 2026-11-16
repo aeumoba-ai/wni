@@ -15,6 +15,7 @@ import PortoModal from './components/PortoModal.jsx';
 import TradeModal, { IncomingTradeModal } from './components/TradeModal.jsx';
 import { ChatDrawer, LogDrawer } from './components/SideDrawers.jsx';
 import CutsceneOverlay from './components/CutsceneOverlay.jsx';
+import { DEFAULT_GRAPHICS_SETTINGS, GRAPHICS_STORAGE_KEY, loadGraphicsSettings, normalizeGraphicsSettings } from './game/GraphicsSettings.js';
 
 const SMOOTH_ANIM_STORAGE_KEY = 'monopoli_konoha_smooth_anim_v1';
 
@@ -68,6 +69,7 @@ export default function App() {
 
   const [audioSettings, setAudioSettings] = useState(() => soundEngine.getSettings());
   const [smoothAnimation, setSmoothAnimation] = useState(loadSmoothAnimationPref);
+  const [graphicsSettings, setGraphicsSettings] = useState(loadGraphicsSettings);
   const [activeCutscene, setActiveCutscene] = useState(null);
   const [cinematicActive, setCinematicActive] = useState(false);
   const [dialogues, setDialogues] = useState({});
@@ -151,6 +153,20 @@ export default function App() {
     [dismissCutscene]
   );
 
+  const handleSetGraphicsPreset = useCallback((preset) => {
+    setGraphicsSettings((current) => normalizeGraphicsSettings({ ...current, preset }));
+  }, []);
+
+  const handleUpdateGraphicsCustom = useCallback((patch) => {
+    setGraphicsSettings((current) =>
+      normalizeGraphicsSettings({ ...current, preset: 'custom', custom: { ...current.custom, ...patch } })
+    );
+  }, []);
+
+  const handleResetGraphics = useCallback(() => {
+    setGraphicsSettings(normalizeGraphicsSettings(DEFAULT_GRAPHICS_SETTINGS));
+  }, []);
+
   const handlePreviewCutscene = useCallback(() => {
     sceneRef.current?.setSmoothAnimation(true);
     soundEngine.playJackpot();
@@ -194,6 +210,7 @@ export default function App() {
       (active) => setCinematicActive(Boolean(active))
     );
     scene.setSmoothAnimation(smoothAnimRef.current);
+    scene.setGraphicsSettings(loadGraphicsSettings());
     sceneRef.current = scene;
     return () => {
       scene.dispose();
@@ -205,6 +222,16 @@ export default function App() {
   useEffect(() => {
     sceneRef.current?.setSmoothAnimation(smoothAnimation);
   }, [smoothAnimation]);
+
+  // Graphics apply locally only (not synchronized across players), and persist per device.
+  useEffect(() => {
+    sceneRef.current?.setGraphicsSettings(graphicsSettings);
+    try {
+      localStorage.setItem(GRAPHICS_STORAGE_KEY, JSON.stringify(graphicsSettings));
+    } catch {
+      // Ignore storage restrictions (e.g. private browsing quota).
+    }
+  }, [graphicsSettings]);
 
   // Sync 3D Scene with active room state
   useEffect(() => {
@@ -423,6 +450,7 @@ export default function App() {
           onOpenSettings={() => setShowSettings(true)}
           smoothAnimation={smoothAnimation}
           audioMaster={audioSettings.muted ? 0 : audioSettings.master}
+          graphicsPreset={graphicsSettings.preset}
           busy={busy}
           error={error}
         />
@@ -595,6 +623,10 @@ export default function App() {
         smoothAnimation={smoothAnimation}
         onToggleSmoothAnimation={handleToggleSmoothAnimation}
         onPreviewCutscene={handlePreviewCutscene}
+        graphicsSettings={graphicsSettings}
+        onSetGraphicsPreset={handleSetGraphicsPreset}
+        onUpdateGraphicsCustom={handleUpdateGraphicsCustom}
+        onResetGraphics={handleResetGraphics}
         onUpdateVolume={handleUpdateVolume}
         onToggleMute={handleToggleMute}
         onToggleBgm={handleToggleBgm}

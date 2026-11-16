@@ -3,6 +3,7 @@ import { BOARD_TILES, DEFAULT_BOARD_SEED, TOTAL_TILES, JAIL_TILE_ID, formatShort
 import { getCharacterById } from '../../shared/characters.js';
 import { soundEngine } from './SoundEngine.js';
 import { buildTileLandmark, buildUpgradeStructure } from './Landmarks3D.js';
+import { DEFAULT_GRAPHICS_SETTINGS, getEffectiveGraphicsSettings } from './GraphicsSettings.js';
 
 const R_IN = 12.2;
 const R_OUT = 18.0;
@@ -333,6 +334,10 @@ export class Scene3D {
     this.renderer.setSize(w, h);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.graphicsSettings = DEFAULT_GRAPHICS_SETTINGS;
+    this.graphics = getEffectiveGraphicsSettings(this.graphicsSettings);
+    this.lastGame = null;
+    this.sunLight = null;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
     container.appendChild(this.renderer.domElement);
@@ -449,6 +454,7 @@ export class Scene3D {
     sun.shadow.camera.top = d;
     sun.shadow.camera.bottom = -d;
     sun.shadow.bias = -0.0005;
+    this.sunLight = sun;
     this.scene.add(sun);
   }
 
@@ -1139,6 +1145,53 @@ export class Scene3D {
     return chosen;
   }
 
+  setGraphicsSettings(settings) {
+    const next = settings || DEFAULT_GRAPHICS_SETTINGS;
+    const previous = this.graphics || getEffectiveGraphicsSettings(DEFAULT_GRAPHICS_SETTINGS);
+    this.graphicsSettings = next;
+    this.graphics = getEffectiveGraphicsSettings(next);
+
+    const compactCap = this.isCompactViewport ? 1.35 : 1.8;
+    const pixelRatio = Math.min(
+      (window.devicePixelRatio || 1) * this.graphics.resolution,
+      compactCap
+    );
+    this.renderer.setPixelRatio(Math.max(0.65, pixelRatio));
+    this.renderer.shadowMap.enabled = Boolean(this.graphics.shadows);
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    if (this.sunLight) {
+      const shadowSize = this.isCompactViewport
+        ? this.graphics.preset === 'high'
+          ? 1536
+          : 1024
+        : this.graphics.preset === 'high'
+          ? 3072
+          : this.graphics.preset === 'low'
+            ? 1024
+            : 2048;
+      this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
+      if (this.sunLight.shadow.map) {
+        this.sunLight.shadow.map.dispose();
+        this.sunLight.shadow.map = null;
+      }
+      this.sunLight.shadow.needsUpdate = true;
+    }
+
+    // Rebuild owned upgrade structures when the user changes building height/detail.
+    const structuresChanged =
+      Math.abs(previous.buildingHeight - this.graphics.buildingHeight) > 0.001 ||
+      Math.abs(previous.detail - this.graphics.detail) > 0.001;
+    if (structuresChanged && this.lastGame?.properties) {
+      for (const tile of this.currentBoard) {
+        const prop = this.lastGame.properties[tile.id];
+        const owner = prop && this.lastGame.players.find((p) => p.id === prop.ownerId);
+        const ownerColor = owner ? getCharacterById(owner.characterId).color : '#eab308';
+        this.rebuildUpgradeBuilding(tile.id, prop?.level || 0, ownerColor);
+      }
+    }
+    this.renderer.setSize(this.container.clientWidth || window.innerWidth, this.container.clientHeight || window.innerHeight);
+  }
+
   setSmoothAnimation(enabled) {
     this.smoothAnimation = Boolean(enabled);
     if (!this.smoothAnimation) {
@@ -1177,20 +1230,22 @@ export class Scene3D {
             ? ['#facc15', '#f59e0b', '#fef08a']
             : [accentHex, '#fef08a', '#ffffff'];
 
-    const count = kind === 'confetti' || kind === 'coins' ? 38 : kind === 'step' ? 6 : 18;
+    const baseCount = kind === 'confetti' || kind === 'coins' ? 38 : kind === 'step' ? 6 : 18;
+    const count = Math.max(2, Math.round(baseCount * (this.graphics?.effects || 1)));
     const now = performance.now();
 
     for (let i = 0; i < count; i++) {
       const col = palette[i % palette.length];
       let geo;
+      const detailSegments = this.graphics?.detail >= 1.35 ? 16 : this.graphics?.detail >= 1 ? 12 : 8;
       if (kind === 'coins') {
-        geo = new THREE.CylinderGeometry(0.24, 0.24, 0.08, 10);
+        geo = new THREE.CylinderGeometry(0.24, 0.24, 0.08, detailSegments);
       } else if (kind === 'confetti') {
         geo = new THREE.BoxGeometry(0.24, 0.05, 0.34);
       } else if (kind === 'step') {
-        geo = new THREE.SphereGeometry(0.14, 6, 6);
+        geo = new THREE.SphereGeometry(0.14, detailSegments, Math.max(4, detailSegments - 2));
       } else {
-        geo = new THREE.OctahedronGeometry(0.18, 0);
+        geo = new THREE.OctahedronGeometry(0.18, this.graphics?.detail >= 1.5 ? 1 : 0);
       }
 
       const mat = new THREE.MeshStandardMaterial({
@@ -1352,6 +1407,7 @@ export class Scene3D {
   }
 
   syncGameState(game) {
+    this.lastGame = game;
     if (!game) {
       for (const p of this.pawns.values()) {
         this.scene.remove(p.group);
@@ -1467,11 +1523,28 @@ export class Scene3D {
   rebuildUpgradeBuilding(tileId, level, ownerColor) {
     const group = this.upgradeGroups.get(tileId);
     if (!group) return;
+    // Quality sliders can rebuild while dragging; dispose old model resources to
+    // avoid a GPU-memory leak after repeated custom graphics changes.
+    for (const spring of this.buildingSprings) {
+      if (spring.group === group) spring.group.scale.set(1, 1, 1);
+    }
+    this.buildingSprings = this.buildingSprings.filter((spring) => spring.group !== group);
     while (group.children.length > 0) {
-      group.remove(group.children[0]);
+      const child = group.children[0];
+      child.traverse?.((object) => {
+        object.geometry?.dispose?.();
+        if (Array.isArray(object.material)) object.material.forEach((material) => material?.dispose?.());
+        else object.material?.dispose?.();
+      });
+      group.remove(child);
     }
     if (level <= 0) return;
-    group.add(buildUpgradeStructure(level, ownerColor));
+    group.add(
+      buildUpgradeStructure(level, ownerColor, {
+        heightScale: this.graphics?.buildingHeight || 1,
+        detail: this.graphics?.detail || 1,
+      })
+    );
     if (this.smoothAnimation) {
       group.scale.set(1.15, 0.05, 1.15);
       this.buildingSprings.push({
@@ -1711,7 +1784,9 @@ export class Scene3D {
     this.camera.fov = aspect < 0.72 ? 54 : aspect < 0.95 ? 47 : 40;
     this.camera.updateProjectionMatrix();
     // Cap DPR on phones for smooth 60fps WebGL instead of overheating the GPU.
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.isCompactViewport ? 1.6 : 2));
+    const deviceCap = this.isCompactViewport ? 1.35 : 1.8;
+    const graphicsScale = this.graphics?.resolution || 1;
+    this.renderer.setPixelRatio(Math.max(0.65, Math.min((window.devicePixelRatio || 1) * graphicsScale, deviceCap)));
     this.renderer.setSize(w, h);
   }
 

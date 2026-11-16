@@ -1154,10 +1154,12 @@ export function buildTileLandmark(tile) {
  * Builds upgrade structures (Level 1 Ruko, Level 2 Hotel/Gedung, Level 3 Prestige Crown Tower)
  * positioned cleanly in the upper-right corner of the tile so the signature Indonesian landmark stays visible!
  */
-export function buildUpgradeStructure(level, ownerColor) {
+export function buildUpgradeStructure(level, ownerColor, options = {}) {
   const g = new THREE.Group();
   if (level <= 0) return g;
 
+  const heightScale = Math.max(0.85, Math.min(1.8, Number(options.heightScale) || 1));
+  const detail = Math.max(0.5, Math.min(1.8, Number(options.detail) || 1));
   const wallMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.58 });
   const accentMat = new THREE.MeshStandardMaterial({ color: ownerColor, roughness: 0.42 });
   const goldMat = new THREE.MeshStandardMaterial({ color: '#facc15', metalness: 0.48, roughness: 0.32 });
@@ -1185,5 +1187,40 @@ export function buildUpgradeStructure(level, ownerColor) {
     g.add(crown);
   }
 
+  // High/custom quality adds facade glazing, roof trim and rooftop detail so
+  // upgrades feel like miniature Indonesian city blocks rather than flat blocks.
+  if (detail >= 1.12) {
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: '#7dd3fc',
+      emissive: '#38bdf8',
+      emissiveIntensity: Math.min(0.5, (detail - 0.8) * 0.22),
+      roughness: 0.18,
+      metalness: 0.28,
+    });
+    const trimMat = new THREE.MeshStandardMaterial({ color: ownerColor, roughness: 0.36, metalness: 0.2 });
+    const floors = level === 1 ? 1 : level === 2 ? 2 : 3;
+    const windowW = detail >= 1.5 ? 0.105 : 0.085;
+    for (let floor = 0; floor < floors; floor++) {
+      const y = 0.24 + floor * 0.39 * heightScale;
+      box(g, windowW, 0.105, 0.035, glassMat, 0.62, y, -0.205);
+      box(g, windowW, 0.105, 0.035, glassMat, 0.88, y, -0.205);
+      if (detail >= 1.35) {
+        box(g, 0.035, 0.105, windowW, glassMat, 0.525, y, -0.46);
+        box(g, 0.035, 0.105, windowW, glassMat, 1.015, y, -0.46);
+      }
+    }
+    box(g, 0.7, 0.045, 0.68, trimMat, 0.76, level === 1 ? 0.78 : level === 2 ? 1.32 : 2.08, -0.46);
+    if (level >= 2 && detail >= 1.4) {
+      // Tiny lit roof sign/antenna on the premium tower.
+      box(g, 0.09, 0.38, 0.09, goldMat, 0.78, 2.35, -0.48);
+      const beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.1, detail >= 1.65 ? 1 : 0), goldMat);
+      beacon.position.set(0.78, 2.57, -0.48);
+      g.add(beacon);
+    }
+  }
+
+  // Scale the internal architecture, not the outer animated group; spring
+  // animations can therefore still freely animate the whole structure.
+  g.scale.y = heightScale;
   return g;
 }
