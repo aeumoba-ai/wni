@@ -164,7 +164,7 @@ function makeTileTexture(tile, ownerInfo = null) {
   }
   if (line) lines.push(line);
 
-  const fontSize = lines.length >= 3 ? 25 : lines[0].length > 10 ? 27 : 32;
+  const fontSize = lines.length >= 3 ? 27 : lines[0].length > 10 ? 29 : 34;
   const startY = 264 - (lines.length - 1) * 18;
   lines.forEach((ln, idx) => {
     drawOutlinedText(
@@ -172,7 +172,7 @@ function makeTileTexture(tile, ownerInfo = null) {
       ln,
       140,
       startY + idx * (fontSize + 5),
-      `900 ${fontSize}px Fredoka, Nunito, sans-serif`,
+      `400 ${fontSize}px "Lilita One", "Baloo 2", sans-serif`,
       '#ffffff',
       '#1e150e',
       7
@@ -182,11 +182,11 @@ function makeTileTexture(tile, ownerInfo = null) {
   // Price or action text below title (dark clean font or red for tax, matching gameplay-3.jpg!)
   const bottomText = tile.price ? formatShortRupiah(tile.price) : tile.subtitle || '';
   if (bottomText && !ownerInfo) {
-    ctx.font = '800 26px Nunito, sans-serif';
+    ctx.font = '800 27px "Baloo 2", "Plus Jakarta Sans", sans-serif';
     ctx.fillStyle = tile.type === 'tax' ? '#b91c1c' : '#3a2e25';
-    ctx.fillText(bottomText, 140, 355);
+    ctx.fillText(bottomText, 140, 356);
   } else if (bottomText && ownerInfo) {
-    ctx.font = '800 22px Nunito, sans-serif';
+    ctx.font = '800 23px "Baloo 2", "Plus Jakarta Sans", sans-serif';
     ctx.fillStyle = '#251a12';
     ctx.fillText(bottomText, 140, 332);
   }
@@ -199,8 +199,8 @@ function makeTileTexture(tile, ownerInfo = null) {
       ctx,
       ownerInfo.name.slice(0, 14),
       140,
-      387,
-      '900 24px Nunito, sans-serif',
+      388,
+      '800 23px "Plus Jakarta Sans", sans-serif',
       '#ffffff',
       '#172026',
       4
@@ -381,8 +381,43 @@ export class Scene3D {
     this.onResize = this.handleResize.bind(this);
     window.addEventListener('resize', this.onResize);
 
+    // Re-render all 40 3D tile textures crisp once the self-hosted theme fonts finish loading!
+    if (typeof document !== 'undefined' && document.fonts?.load) {
+      Promise.all([
+        document.fonts.load('400 34px "Lilita One"'),
+        document.fonts.load('800 27px "Baloo 2"'),
+        document.fonts.load('800 23px "Plus Jakarta Sans"'),
+        document.fonts.ready,
+      ])
+        .then(() => {
+          if (!this.disposed) this.refreshAllTileFonts();
+        })
+        .catch(() => {
+          // Fallback system fonts are already acceptable if a font fails to load.
+        });
+    }
+
     this.animate = this.animate.bind(this);
     this.rafId = requestAnimationFrame(this.animate);
+  }
+
+  refreshAllTileFonts() {
+    for (const tile of this.currentBoard) {
+      const mesh = this.tileMeshes.get(tile.id);
+      if (!mesh) continue;
+      const hash = this.tileOwnersHash.get(tile.id);
+      let ownerInfo = null;
+      if (hash && hash !== 'none') {
+        // Hash format: `${owner.id}:${owner.name}:${hexColor}:${level}`.
+        // Parse from the right so names containing ':' stay intact.
+        const match = /^([^:]+):(.+):(#[0-9a-fA-F]{3,8}):(\d+)$/.exec(hash);
+        if (match) ownerInfo = { name: match[2], color: match[3] };
+      }
+      const oldMap = mesh.material.map;
+      mesh.material.map = makeTileTexture(tile, ownerInfo);
+      mesh.material.needsUpdate = true;
+      if (oldMap) oldMap.dispose();
+    }
   }
 
   setupLights() {

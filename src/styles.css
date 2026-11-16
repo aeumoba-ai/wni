@@ -11,6 +11,10 @@
   --red-accent: #c9332b;
   --text-dark: #2a1d14;
   --text-muted: #5a422d;
+  --font-display: 'Lilita One', 'Baloo 2', system-ui, sans-serif;
+  --font-heading: 'Baloo 2', 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-body: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 * {
@@ -32,7 +36,11 @@ body,
   width: 100%;
   height: 100%;
   overflow: hidden;
-  font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   color: var(--text-dark);
   background: #89cff0;
 }
@@ -146,7 +154,7 @@ body,
 }
 
 .game-logo {
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: clamp(26px, 5vw, 34px);
   font-weight: 700;
   letter-spacing: 0.4px;
@@ -384,7 +392,7 @@ body,
   border: 2.5px solid var(--kraft-border);
   border-radius: 11px;
   color: #ffffff;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 15.5px;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -418,7 +426,7 @@ body,
   border: 2.5px solid var(--kraft-border);
   border-radius: 11px;
   color: #ffffff;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 14.5px;
   font-weight: 700;
   letter-spacing: 0.4px;
@@ -639,7 +647,7 @@ body,
 }
 
 .waiting-title {
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 24px;
   color: var(--text-dark);
 }
@@ -671,7 +679,7 @@ body,
 }
 
 .invite-code-value {
-  font-family: 'Fredoka', monospace;
+  font-family: var(--font-mono);
   font-size: 30px;
   font-weight: 700;
   letter-spacing: 5px;
@@ -1090,7 +1098,7 @@ body,
 }
 
 .hud-player-money {
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 14.5px;
   font-weight: 700;
   color: #fde047;
@@ -1120,7 +1128,7 @@ body,
   position: absolute;
   top: calc(100% + 4px);
   right: 8px;
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 15px;
   font-weight: 700;
   padding: 2px 8px;
@@ -1179,7 +1187,7 @@ body,
 }
 
 .kas-val {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 15px;
   font-weight: 700;
   color: #fff6c4;
@@ -1192,7 +1200,7 @@ body,
   border: 2px solid #0b1625;
   border-radius: 11px;
   padding: 7px 11px;
-  font-family: 'Fredoka', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 1.5px;
@@ -1344,7 +1352,7 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.4px;
@@ -1416,7 +1424,7 @@ body,
   border: 2.5px solid #2a1d14;
   border-radius: 11px;
   color: #ffffff;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 16px;
   font-weight: 700;
   letter-spacing: 0.6px;
@@ -1520,7 +1528,7 @@ body,
 }
 
 .modal-title {
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 20px;
   color: var(--text-dark);
 }
@@ -1570,7 +1578,7 @@ body,
 }
 
 .deed-name {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 22px;
   text-shadow: 0 1.5px 0 rgba(0, 0, 0, 0.35);
 }
@@ -1662,7 +1670,7 @@ body,
 }
 
 .card-title {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 22px;
   color: #1e1b18;
   margin-bottom: 8px;
@@ -1846,7 +1854,7 @@ body,
 }
 
 .victory-title {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 26px;
   margin-top: 4px;
 }
@@ -1879,7 +1887,7 @@ body,
 }
 
 .rank-num {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 18px;
   font-weight: 700;
   width: 28px;
@@ -1901,7 +1909,7 @@ body,
 }
 
 .rank-worth {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 15px;
   font-weight: 700;
   color: #15803d;
@@ -1969,7 +1977,7 @@ body,
 }
 
 .drawer-head h3 {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 16px;
 }
 
@@ -2083,7 +2091,7 @@ body,
 }
 
 .tile-insp-name {
-  font-family: 'Fredoka', sans-serif;
+  font-family: var(--font-heading);
   font-size: 15px;
   line-height: 1.15;
 }
@@ -2380,7 +2388,7 @@ body,
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.3px;
@@ -2474,7 +2482,7 @@ body,
 .kraft-switch-label {
   width: 100%;
   text-align: right;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 11px;
   font-weight: 900;
   color: #334155;
@@ -2501,7 +2509,7 @@ body,
   border: 2px solid rgba(42, 29, 20, 0.35);
   background: rgba(255, 255, 255, 0.55);
   color: #4d3420;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 11.5px;
   font-weight: 800;
   cursor: pointer;
@@ -2530,7 +2538,7 @@ body,
 }
 
 .smooth-features-title {
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 12.5px;
   font-weight: 800;
   color: #2a1d14;
@@ -2943,7 +2951,7 @@ body,
   border: 2px solid #23170f;
   background: var(--cs-accent);
   color: #ffffff;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 11.5px;
   font-weight: 900;
   letter-spacing: 0.7px;
@@ -2957,7 +2965,7 @@ body,
 
 .cutscene-title {
   margin: 4px 0 0;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: clamp(22px, 4vw, 32px);
   font-weight: 900;
   line-height: 1.12;
@@ -3062,7 +3070,7 @@ body,
   border-radius: 999px;
   background: var(--cs-accent);
   color: #ffffff;
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.5px;
@@ -3074,7 +3082,7 @@ body,
 }
 
 .cutscene-ribbon-title {
-  font-family: 'Fredoka', 'Nunito', sans-serif;
+  font-family: var(--font-heading);
   font-size: 16px;
   font-weight: 900;
   color: #23170f;
@@ -3097,4 +3105,113 @@ body,
 }
 
 
+
+
+
+/* ==================== TYPOGRAPHY HIERARCHY (KRAFT BOARD-GAME THEME) ====================
+   Lilita One = chunky cartoon display for logo / major titles / 3D tile headings.
+   Baloo 2    = friendly rounded headings, buttons, HUD, and game numbers.
+   Plus Jakarta Sans = clean Indonesian-designed UI/body font for small text.
+   JetBrains Mono    = stable tabular room codes, timestamps, and percentages.
+   All are self-hosted variable WOFF2 with font-display: swap (see src/fonts.css).
+   ====================================================================================== */
+
+.game-logo,
+.waiting-title,
+.modal-title,
+.deed-name,
+.card-title,
+.victory-title,
+.tile-insp-name,
+.cutscene-title,
+.cutscene-ribbon-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.25px;
+}
+
+.game-logo {
+  font-size: clamp(28px, 5.2vw, 37px);
+  line-height: 1.02;
+}
+
+.waiting-title {
+  font-size: 25px;
+}
+
+.modal-title {
+  font-size: 21.5px;
+}
+
+.deed-name,
+.card-title {
+  font-size: 23px;
+}
+
+.victory-title {
+  font-size: 28px;
+}
+
+.tile-insp-name {
+  font-size: 18px;
+}
+
+.cutscene-title {
+  font-size: clamp(24px, 4.2vw, 34px);
+  line-height: 1.08;
+}
+
+.cutscene-ribbon-title {
+  font-size: 18px;
+  line-height: 1.12;
+}
+
+.cutscene-badge,
+.cutscene-ribbon-badge,
+.settings-tab-pill,
+.kraft-switch-label,
+.smooth-mode-pill,
+.smooth-features-title,
+.settings-label {
+  font-family: var(--font-heading);
+  letter-spacing: 0.35px;
+}
+
+.invite-code-value,
+.room-code-chip,
+.kraft-input.code-input,
+.settings-pct-badge,
+.chat-time,
+.rank-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.invite-code-value {
+  letter-spacing: 4px;
+}
+
+.kraft-input.code-input {
+  letter-spacing: 4px;
+}
+
+.hud-player-money,
+.money-float,
+.kas-val,
+.rank-worth,
+.gauge-seg,
+.btn-roll,
+.btn-green,
+.btn-tan {
+  font-variant-numeric: tabular-nums;
+}
+
+.field-label,
+.lobby-subtitle,
+.cutscene-subtitle,
+.cutscene-ribbon-sub,
+.smooth-features-list,
+.settings-desc {
+  font-family: var(--font-body);
+}
 
