@@ -358,6 +358,7 @@ export default function App() {
           {incomingTrade && (
             <IncomingTradeModal
               trade={incomingTrade}
+              board={room.game.board}
               onRespond={(accept) => emitAction('game_respond_trade', { accept })}
             />
           )}
@@ -384,7 +385,7 @@ export default function App() {
           />
 
           {selectedTileId !== null && (() => {
-            const tile = getTileById(selectedTileId);
+            const tile = getTileById(selectedTileId, room.game.board);
             const prop = room.game.properties?.[tile.id];
             const owner = prop ? room.game.players.find((p) => p.id === prop.ownerId) : null;
             const grp = COLOR_GROUPS[tile.group];
@@ -393,7 +394,9 @@ export default function App() {
               <div className="tile-inspector-card kraft-card">
                 <div className="tile-insp-head" style={{ background: tile.color || '#334155' }}>
                   <div>
-                    <div className="tile-insp-sub">{grp?.label || tile.type.toUpperCase()}</div>
+                    <div className="tile-insp-sub">
+                      {grp?.label || tile.type.toUpperCase()}{tile.province ? ` · ${tile.province}` : ''}
+                    </div>
                     <div className="tile-insp-name">{tile.name}</div>
                   </div>
                   <button className="tile-insp-x" onClick={() => setSelectedTileId(null)}>
@@ -401,6 +404,11 @@ export default function App() {
                   </button>
                 </div>
                 <div className="tile-insp-body">
+                  {tile.flavor && (
+                    <div style={{ display: 'block', fontSize: 11.5, opacity: 0.85, marginBottom: 6, lineHeight: 1.35 }}>
+                      {tile.flavor}
+                    </div>
+                  )}
                   {tile.price && (
                     <div>
                       <span>Harga</span>

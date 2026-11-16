@@ -1,5 +1,4 @@
 import {
-  BOARD_TILES,
   INITIAL_KAS_NEGARA,
   JAIL_BAIL_AMOUNT,
   JAIL_TILE_ID,
@@ -7,6 +6,7 @@ import {
   STARTING_MONEY,
   TOTAL_TILES,
   formatShortRupiah,
+  generateRandomBoard,
   getGroupTiles,
   getTileById,
 } from './boardData.js';
@@ -44,6 +44,12 @@ export class GameEngine {
     this.turnIndex = 0;
     this.phase = 'WAITING_ROLL'; // WAITING_ROLL | MOVING | ACTION_PENDING | DEBT_RESOLUTION | GAME_OVER
     this.kasNegara = INITIAL_KAS_NEGARA;
+
+    // Generate a brand-new randomized 40-tile 100%-Indonesian board for EVERY game!
+    const randomBoard = generateRandomBoard();
+    this.boardSeed = randomBoard.seed;
+    this.board = randomBoard.tiles;
+
     this.consecutiveDoubles = 0;
     this.lastDice = [1, 1];
     this.lastRollMode = 'acak';
@@ -85,7 +91,7 @@ export class GameEngine {
     this.turnDeadline = 0;
     this.destroyed = false;
 
-    this.addLog('Permainan dimulai! Setiap pemain memulai dengan modal Rp15.000.000.');
+    this.addLog('Peta 40 petak Nusantara diacak baru untuk game ini! Semua pemain mulai dengan modal Rp15.000.000.');
     this.startTurn();
   }
 
@@ -158,7 +164,7 @@ export class GameEngine {
     let total = player.money;
     for (const [tileIdStr, prop] of Object.entries(this.properties)) {
       if (prop.ownerId === player.id) {
-        const tile = getTileById(Number(tileIdStr));
+        const tile = getTileById(Number(tileIdStr), this.board);
         total += (tile.price || 0) + (prop.level || 0) * (tile.upgradeCost || 0);
       }
     }
@@ -169,6 +175,8 @@ export class GameEngine {
     const now = Date.now();
     const timeLeft = this.turnDeadline > now ? Math.ceil((this.turnDeadline - now) / 1000) : 0;
     return {
+      boardSeed: this.boardSeed,
+      board: this.board,
       round: this.round,
       maxRounds: this.maxRounds,
       speed: this.speed,
@@ -275,7 +283,7 @@ export class GameEngine {
     if (player.money > 6_000_000) {
       const ownedProps = Object.entries(this.properties)
         .filter(([, prop]) => prop.ownerId === player.id)
-        .map(([tid, prop]) => ({ tile: getTileById(Number(tid)), prop }))
+        .map(([tid, prop]) => ({ tile: getTileById(Number(tid), this.board), prop }))
         .filter(({ tile, prop }) => tile.type === 'property' && prop.level < 3 && player.money - tile.upgradeCost >= 3_500_000);
       if (ownedProps.length > 0 && Math.random() < 0.5) {
         const pick = ownedProps[Math.floor(Math.random() * ownedProps.length)];
@@ -452,7 +460,7 @@ export class GameEngine {
 
     this.statusText = `${player.name} melempar ${d1} + ${d2} = ${steps} langkah...`;
     const modeLabel = this.lastRollMode === 'acak' ? '' : ` [${this.lastRollMode.toUpperCase()}]`;
-    this.addLog(`${player.name} melempar dadu [${d1}+${d2}=${steps}]${modeLabel} menuju ${getTileById(toPos).name}.`);
+    this.addLog(`${player.name} melempar dadu [${d1}+${d2}=${steps}]${modeLabel} menuju ${getTileById(toPos, this.board).name}.`);
 
     if (passedStart) {
       player.money += PASS_START_BONUS;
@@ -482,13 +490,13 @@ export class GameEngine {
   calculateRent(tile, prop, diceTotal = 7) {
     const ownerId = prop.ownerId;
     if (tile.type === 'transport') {
-      const ownedCount = getGroupTiles('transport').filter(
+      const ownedCount = getGroupTiles('transport', this.board).filter(
         (t) => this.properties[t.id]?.ownerId === ownerId
       ).length;
       return tile.rents[Math.min(Math.max(ownedCount - 1, 0), tile.rents.length - 1)];
     }
     if (tile.type === 'utility') {
-      const ownedCount = getGroupTiles('utility').filter(
+      const ownedCount = getGroupTiles('utility', this.board).filter(
         (t) => this.properties[t.id]?.ownerId === ownerId
       ).length;
       return ownedCount >= 2 ? diceTotal * 250_000 : diceTotal * 120_000;
@@ -497,7 +505,7 @@ export class GameEngine {
       const level = prop.level || 0;
       let rent = tile.rents[Math.min(level, tile.rents.length - 1)];
       if (level === 0) {
-        const groupTiles = getGroupTiles(tile.group);
+        const groupTiles = getGroupTiles(tile.group, this.board);
         const ownsAll = groupTiles.every((t) => this.properties[t.id]?.ownerId === ownerId);
         if (ownsAll) {
           rent = Math.round(rent * 1.5);
@@ -510,7 +518,7 @@ export class GameEngine {
 
   resolveLanding(player, canRollAgain) {
     if (this.destroyed) return;
-    const tile = getTileById(player.position);
+    const tile = getTileById(player.position, this.board);
     const diceSum = this.lastDice[0] + this.lastDice[1];
 
     // 1. START
@@ -759,7 +767,7 @@ export class GameEngine {
     // Sell cheapest properties until debt covered, otherwise declare bankruptcy
     const owned = Object.entries(this.properties)
       .filter(([, p]) => p.ownerId === player.id)
-      .map(([tid, p]) => ({ tile: getTileById(Number(tid)), prop: p }))
+      .map(([tid, p]) => ({ tile: getTileById(Number(tid), this.board), prop: p }))
       .sort((a, b) => (a.tile.price || 0) - (b.tile.price || 0));
 
     for (const item of owned) {
@@ -977,9 +985,22 @@ export class GameEngine {
       return { ok: true };
     }
 
-    if (eff.type === 'move_to') {
+    if (eff.type === 'move_to' || eff.type === 'move_to_random_property' || eff.type === 'move_to_nearest_transport') {
       const fromPos = player.position;
-      const toPos = eff.tileId;
+      let toPos = eff.tileId ?? 0;
+
+      if (eff.type === 'move_to_random_property') {
+        const propTiles = this.board.filter((t) => t.type === 'property');
+        const pick = propTiles[Math.floor(Math.random() * propTiles.length)];
+        toPos = pick ? pick.id : 1;
+        this.addLog(`✈️ ${player.name} terbang dinas menuju ${getTileById(toPos, this.board).name}!`, 'card');
+      } else if (eff.type === 'move_to_nearest_transport') {
+        const transportIds = this.board.filter((t) => t.type === 'transport').map((t) => t.id);
+        const ahead = transportIds.find((id) => id > fromPos);
+        toPos = ahead !== undefined ? ahead : (transportIds[0] ?? 5);
+        this.addLog(`🚆 ${player.name} meluncur cepat menuju ${getTileById(toPos, this.board).name}!`, 'card');
+      }
+
       const passedStart = eff.collectStart && (toPos === 0 || toPos < fromPos);
       player.position = toPos;
       if (passedStart) {
@@ -1016,7 +1037,7 @@ export class GameEngine {
     this.clearTimers();
     const { tileId, price, canRollAgain } = this.pendingAction;
     const player = this.getPlayer(playerId);
-    const tile = getTileById(tileId);
+    const tile = getTileById(tileId, this.board);
     this.pendingAction = null;
 
     if (buy && player.money >= price && !this.properties[tileId]) {
@@ -1063,7 +1084,7 @@ export class GameEngine {
       return { error: 'Hanya bisa mengembangkan properti saat giliran Anda.' };
     }
 
-    const tile = getTileById(tileId);
+    const tile = getTileById(tileId, this.board);
     const prop = this.properties[tileId];
     if (!prop || prop.ownerId !== playerId) return { error: 'Anda bukan pemilik properti ini.' };
     if (tile.type !== 'property') return { error: 'Properti ini tidak bisa di-upgrade.' };
@@ -1086,7 +1107,7 @@ export class GameEngine {
   sellPropertyInternal(player, tileId) {
     const prop = this.properties[tileId];
     if (!prop || prop.ownerId !== player.id) return 0;
-    const tile = getTileById(tileId);
+    const tile = getTileById(tileId, this.board);
     const invested = (tile.price || 0) + (prop.level || 0) * (tile.upgradeCost || 0);
     const refund = Math.round(invested * 0.7);
     delete this.properties[tileId];
@@ -1166,7 +1187,7 @@ export class GameEngine {
       const valueOf = (tids, money) =>
         money +
         tids.reduce((acc, tid) => {
-          const t = getTileById(tid);
+          const t = getTileById(tid, this.board);
           const lvl = this.properties[tid]?.level || 0;
           return acc + (t.price || 0) + lvl * (t.upgradeCost || 0);
         }, 0);

@@ -32,8 +32,8 @@ export default function HowToPlayModal({ onClose }) {
           <div className="howto-item">
             <div className="howto-badge"><Home size={18} /></div>
             <div>
-              <strong>Borong, Upgrade & Dagang Properti</strong>
-              <p>Setiap pemain mulai dengan <strong>Rp15.000.000</strong>. Beli wilayah kosong, kembangkan jadi <em>Ruko → Gedung → Landmark</em> untuk melipatgandakan sewa, atau bertransaksi lewat tombol <strong>PORTO</strong> &amp; <strong>DAGANG</strong>.</p>
+              <strong>40 Petak Nusantara Acak Setiap Game!</strong>
+              <p>Setiap permainan baru mengacak <strong>40 petak 100% lokasi Indonesia</strong> (dari Aceh sampai Papua — dipilih acak dari 48 destinasi, transportasi &amp; BUMN Nusantara!). Setiap pemain mulai dengan <strong>Rp15.000.000</strong>. Kembangkan aset jadi <em>Ruko → Gedung → Landmark</em> atau bertransaksi lewat <strong>PORTO</strong> &amp; <strong>DAGANG</strong>.</p>
             </div>
           </div>
 

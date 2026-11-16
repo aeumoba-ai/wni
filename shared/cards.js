@@ -101,11 +101,11 @@ export const LOBBY_CARDS = [
     effect: { type: 'kas_half' },
   },
   {
-    id: 'lob_bali',
+    id: 'lob_wisata',
     deck: 'lobby',
-    title: 'Rapat Kerja di Canggu, Bali',
-    description: 'Studi banding sambil liburan! Langsung terbang ke Canggu, Bali.',
-    effect: { type: 'move_to', tileId: 6, collectStart: true },
+    title: 'Kunjungan Kerja Wisata Nusantara',
+    description: 'Studi banding sambil liburan! Meluncur langsung ke salah satu destinasi wisata acak di papan (lewat Mulai tetap gajian!).',
+    effect: { type: 'move_to_random_property', collectStart: true },
   },
   {
     id: 'lob_traktir',
@@ -129,11 +129,11 @@ export const LOBBY_CARDS = [
     effect: { type: 'tax', amount: 1_200_000 },
   },
   {
-    id: 'lob_whoosh',
+    id: 'lob_transport',
     deck: 'lobby',
-    title: 'Naik Kereta Cepat Whoosh',
-    description: 'Meluncur kilat ke Stasiun Whoosh! (Jika lewat Mulai, tetap dapat gaji.)',
-    effect: { type: 'move_to', tileId: 27, collectStart: true },
+    title: 'Perjalanan Dinas Kilat!',
+    description: 'Meluncur cepat ke petak Transportasi Nusantara terdekat di depanmu! (Jika lewat Mulai, tetap dapat gaji.)',
+    effect: { type: 'move_to_nearest_transport', collectStart: true },
   },
   {
     id: 'lob_dividen',

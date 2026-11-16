@@ -12,7 +12,8 @@ export default function PortoModal({ game, myId, onUpgrade, onSell, onClose }) {
   const me = game.players.find((p) => p.id === myId);
   const isMyTurn = game.currentPlayerId === myId && !me?.bankrupt;
 
-  const myTiles = BOARD_TILES.filter((t) => game.properties?.[t.id]?.ownerId === myId).map((tile) => {
+  const board = game.board?.length ? game.board : BOARD_TILES;
+  const myTiles = board.filter((t) => game.properties?.[t.id]?.ownerId === myId).map((tile) => {
     const prop = game.properties[tile.id];
     const invested = (tile.price || 0) + (prop.level || 0) * (tile.upgradeCost || 0);
     const sellValue = Math.round(invested * 0.7);

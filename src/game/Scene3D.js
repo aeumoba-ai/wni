@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { BOARD_TILES, TOTAL_TILES, formatShortRupiah } from '../../shared/boardData.js';
+import { BOARD_TILES, DEFAULT_BOARD_SEED, TOTAL_TILES, formatShortRupiah } from '../../shared/boardData.js';
 import { getCharacterById } from '../../shared/characters.js';
 import { soundEngine } from './SoundEngine.js';
+import { buildTileLandmark, buildUpgradeStructure } from './Landmarks3D.js';
 
-const R_IN = 10.7;
-const R_OUT = 16.3;
+const R_IN = 12.2;
+const R_OUT = 18.0;
 const R_MID = (R_IN + R_OUT) / 2;
 const BOARD_Y = 1.65;
 const START_ANGLE = Math.PI * 0.22; // Bottom-right, matching gameplay-2.jpg & gameplay-3.jpg!
@@ -350,11 +351,13 @@ export class Scene3D {
       userControlledUntil: 0,
     };
 
+    this.currentBoard = BOARD_TILES;
+    this.currentBoardSeed = DEFAULT_BOARD_SEED;
     this.tileMeshes = new Map();
     this.tileGlowMeshes = new Map();
     this.tileOwnersHash = new Map();
     this.upgradeGroups = new Map();
-    this.defaultProps = new Map();
+    this.landmarkAnims = [];
     this.pawns = new Map();
     this.cars = [];
     this.flagMesh = null;
@@ -729,27 +732,53 @@ export class Scene3D {
       g.position.set(x, BOARD_Y + 0.12, -0.35);
       boardGroup.add(g);
     };
-    buildDeckRaft(-3.4, '#2452b3', '#facc15');
-    buildDeckRaft(3.4, '#d9a76a', '#dc2626');
+    buildDeckRaft(-3.8, '#2452b3', '#facc15');
+    buildDeckRaft(3.8, '#d9a76a', '#dc2626');
 
-    // 32 Circular Tiles
+    // Dynamic 40-tile container (rebuilt cleanly whenever a new game randomizes the Indonesian board!)
     const angleStep = (Math.PI * 2) / TOTAL_TILES;
-    const tileGeo = createTileSectorGeometry(R_IN + 0.1, R_OUT + 0.06, angleStep * 0.968, 5);
-    const glowGeo = createOwnerGlowBorderGeometry(R_IN + 0.15, R_OUT - 0.04, angleStep * 0.93, 0.5);
+    this.tileSectorGeo = createTileSectorGeometry(R_IN + 0.1, R_OUT + 0.06, angleStep * 0.968, 5);
+    this.tileGlowGeo = createOwnerGlowBorderGeometry(R_IN + 0.15, R_OUT - 0.04, angleStep * 0.93, 0.5);
+    this.dynamicTilesGroup = new THREE.Group();
+    boardGroup.add(this.dynamicTilesGroup);
 
-    for (const tile of BOARD_TILES) {
+    this.populateBoardTiles(this.currentBoard, this.currentBoardSeed);
+  }
+
+  populateBoardTiles(boardTiles, boardSeed) {
+    // Cleanly dispose previous tile textures & clear dynamic group
+    for (const mesh of this.tileMeshes.values()) {
+      if (mesh.material?.map) mesh.material.map.dispose();
+      if (mesh.material) mesh.material.dispose();
+    }
+    for (const glow of this.tileGlowMeshes.values()) {
+      if (glow.material) glow.material.dispose();
+    }
+    while (this.dynamicTilesGroup.children.length > 0) {
+      this.dynamicTilesGroup.remove(this.dynamicTilesGroup.children[0]);
+    }
+    this.tileMeshes.clear();
+    this.tileGlowMeshes.clear();
+    this.tileOwnersHash.clear();
+    this.upgradeGroups.clear();
+    this.landmarkAnims = [];
+
+    this.currentBoard = boardTiles;
+    this.currentBoardSeed = boardSeed;
+
+    for (const tile of boardTiles) {
       const tex = makeTileTexture(tile, null);
       const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.76 });
-      const mesh = new THREE.Mesh(tileGeo, mat);
+      const mesh = new THREE.Mesh(this.tileSectorGeo, mat);
       const angle = tileAngle(tile.id);
       mesh.position.y = BOARD_Y + 0.04;
       mesh.rotation.y = -angle;
       mesh.receiveShadow = true;
       mesh.userData = { tileId: tile.id };
-      boardGroup.add(mesh);
+      this.dynamicTilesGroup.add(mesh);
       this.tileMeshes.set(tile.id, mesh);
 
-      // Translucent neon owner aura box (hidden until bought — exact effect of Bot Yanti tile in gameplay-3!)
+      // Translucent neon owner aura box
       const glowMat = new THREE.MeshBasicMaterial({
         color: '#2dd4bf',
         transparent: true,
@@ -757,169 +786,37 @@ export class Scene3D {
         side: THREE.DoubleSide,
         depthWrite: false,
       });
-      const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+      const glowMesh = new THREE.Mesh(this.tileGlowGeo, glowMat);
       glowMesh.position.y = BOARD_Y + 0.56;
       glowMesh.rotation.y = -angle;
       glowMesh.visible = false;
-      boardGroup.add(glowMesh);
+      this.dynamicTilesGroup.add(glowMesh);
       this.tileGlowMeshes.set(tile.id, glowMesh);
 
-      // Add 3D landmark / default bench prop on tile
-      this.addLandmarkOrDefaultProp(boardGroup, tile, angle);
+      // Add bespoke Indonesian 3D landmark miniature
+      this.addLandmarkOrDefaultProp(this.dynamicTilesGroup, tile, angle);
 
       // Upgrade buildings container
       const upGroup = new THREE.Group();
       const pos = tileWorldPos(tile.id, R_IN + 1.55);
       upGroup.position.set(pos.x, BOARD_Y + 0.06, pos.z);
       upGroup.rotation.y = -angle + Math.PI / 2;
-      boardGroup.add(upGroup);
+      upGroup.scale.setScalar(0.86);
+      this.dynamicTilesGroup.add(upGroup);
       this.upgradeGroups.set(tile.id, upGroup);
     }
   }
 
   addLandmarkOrDefaultProp(parent, tile, angle) {
-    const g = new THREE.Group();
-    const pos = tileWorldPos(tile.id, R_IN + 1.65);
-    g.position.set(pos.x, BOARD_Y + 0.06, pos.z);
-    g.rotation.y = -angle + Math.PI / 2;
-
-    const redMat = new THREE.MeshStandardMaterial({ color: '#dc2626', roughness: 0.45 });
-    const whiteMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.58 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: '#1e242b', roughness: 0.55 });
-    const orangeMat = new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.45 });
-    const blueMat = new THREE.MeshStandardMaterial({ color: '#0284c7', roughness: 0.45 });
-    const tealMat = new THREE.MeshStandardMaterial({ color: '#0d9488', roughness: 0.5 });
-    const woodMat = new THREE.MeshStandardMaterial({ color: '#9c6b3d', roughness: 0.8 });
-    const goldMat = new THREE.MeshStandardMaterial({ color: '#f59e0b', metalness: 0.45, roughness: 0.35 });
-
-    if (tile.landmark === 'gapura') {
-      // Iconic tall Indonesian red-and-white Gapura gate (gameplay-2.jpg!)
-      const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.32, 2.35, 0.32), whiteMat);
-      p1.position.set(-1.12, 1.17, 0);
-      const p2 = p1.clone();
-      p2.position.x = 1.12;
-      const top = new THREE.Mesh(new THREE.BoxGeometry(2.75, 0.48, 0.46), redMat);
-      top.position.y = 2.4;
-      p1.castShadow = p2.castShadow = top.castShadow = true;
-      g.add(p1, p2, top);
-    } else if (tile.landmark === 'jail') {
-      // Iconic RUTAN KPK: white prison building, flat red roof, black vertical bars (gameplay-3.jpg!)
-      const body = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.45, 1.45), whiteMat);
-      body.position.y = 0.72;
-      body.castShadow = true;
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(2.55, 0.45, 1.72), redMat);
-      roof.position.y = 1.62;
-      roof.castShadow = true;
-      g.add(body, roof);
-      for (let bx = -0.82; bx <= 0.82; bx += 0.27) {
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.88, 0.08), darkMat);
-        bar.position.set(bx, 0.65, 0.75);
-        g.add(bar);
-      }
-    } else if (tile.landmark === 'pbb') {
-      // Iconic PBB Hall with white columns & bright red roof (gameplay-3.jpg!)
-      const base = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.22, 1.35), whiteMat);
-      base.position.y = 0.11;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.1, 1.1), whiteMat);
-      body.position.y = 0.7;
-      for (let cx = -0.7; cx <= 0.7; cx += 0.46) {
-        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 1.1, 8), whiteMat);
-        col.position.set(cx, 0.7, 0.6);
-        g.add(col);
-      }
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(1.55, 0.72, 4), redMat);
-      roof.rotation.y = Math.PI / 4;
-      roof.position.y = 1.55;
-      g.add(base, body, roof);
-    } else if (tile.landmark === 'port') {
-      // Pelabuhan Merak / Belawan: blue dock + orange port crane (gameplay-3.jpg!)
-      const dock = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.24, 1.35), blueMat);
-      dock.position.y = 0.12;
-      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.9, 0.22), orangeMat);
-      mast.position.set(0.46, 1.0, 0);
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.18, 0.2), orangeMat);
-      arm.position.set(-0.18, 1.9, 0);
-      g.add(dock, mast, arm);
-    } else if (tile.landmark === 'pln') {
-      // PLN twin silver electricity towers (gameplay-3.jpg!)
-      const silver = new THREE.MeshStandardMaterial({ color: '#94a3b8', metalness: 0.4, roughness: 0.45 });
-      [-0.42, 0.42].forEach((ox) => {
-        const tower = new THREE.Mesh(new THREE.ConeGeometry(0.32, 1.85, 4), silver);
-        tower.position.set(ox, 0.92, 0);
-        g.add(tower);
-      });
-      const wire = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.06, 0.06), darkMat);
-      wire.position.y = 1.45;
-      g.add(wire);
-    } else if (tile.landmark === 'pdam') {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.25, 1.1, 8), whiteMat);
-      leg.position.y = 0.55;
-      const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.56, 0.85, 12), blueMat);
-      tank.position.y = 1.4;
-      g.add(leg, tank);
-    } else if (tile.landmark === 'folder') {
-      // Lobi Orang Dalam stacked cardboard dossier box (gameplay-3.jpg!)
-      const box = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.26, 0.96), woodMat);
-      box.position.y = 0.14;
-      const tape = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.28, 0.98), new THREE.MeshStandardMaterial({ color: '#f4d3a1' }));
-      tape.position.y = 0.15;
-      g.add(box, tape);
-    } else if (tile.landmark === 'vault') {
-      // Kas Negara imposing dark vault cube + golden bar (top-left black landmark in gameplay-2!)
-      const vault = new THREE.Mesh(new THREE.BoxGeometry(1.85, 1.5, 1.4), darkMat);
-      vault.position.y = 0.75;
-      vault.castShadow = true;
-      const gold = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.26, 0.6), goldMat);
-      gold.position.y = 1.62;
-      g.add(vault, gold);
-    } else if (tile.landmark === 'airport') {
-      const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.36, 1.55, 8), whiteMat);
-      tower.position.set(-0.42, 0.78, 0);
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.34, 0.35, 8), blueMat);
-      cap.position.set(-0.42, 1.6, 0);
-      const plane = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.18, 0.34), whiteMat);
-      plane.position.set(0.45, 0.32, 0.1);
-      g.add(tower, cap, plane);
-    } else if (tile.landmark === 'train') {
-      const train = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.48, 0.52), whiteMat);
-      train.position.y = 0.28;
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.14, 0.54), redMat);
-      stripe.position.y = 0.28;
-      g.add(train, stripe);
-    } else if (tile.landmark === 'toll') {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.85, 0.25), whiteMat);
-      post.position.set(-0.55, 0.42, 0);
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.12, 0.12), redMat);
-      bar.position.set(0.1, 0.65, 0);
-      g.add(post, bar);
-    } else if (tile.landmark === 'siren') {
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.65, 1.1, 1.1), whiteMat);
-      body.position.y = 0.55;
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.34, 1.3), redMat);
-      roof.position.y = 1.25;
-      const beacon = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.22, 0.24, 0.36, 10),
-        new THREE.MeshStandardMaterial({ color: '#ef4444', emissive: '#ef4444', emissiveIntensity: 0.7 })
-      );
-      beacon.position.y = 1.6;
-      g.add(body, roof, beacon);
-    } else if (tile.type === 'property') {
-      // Cute miniature wooden bench + signpost prop (seen on Canggu, Lumpur Lapindo, etc. in gameplay-3!)
-      const seat = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.12, 0.36), tile.group === 'teal' ? tealMat : woodMat);
-      seat.position.set(0, 0.34, 0);
-      const back = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.28, 0.08), tile.group === 'teal' ? tealMat : woodMat);
-      back.position.set(0, 0.52, -0.15);
-      const leg1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.34, 0.3), darkMat);
-      leg1.position.set(-0.36, 0.17, 0);
-      const leg2 = leg1.clone();
-      leg2.position.x = 0.36;
-      g.add(seat, back, leg1, leg2);
-      this.defaultProps.set(tile.id, g);
-    } else {
-      return;
+    const { group, animations } = buildTileLandmark(tile);
+    const pos = tileWorldPos(tile.id, R_IN + 1.55);
+    group.position.set(pos.x, BOARD_Y + 0.06, pos.z);
+    group.rotation.y = -angle + Math.PI / 2;
+    group.scale.setScalar(0.86);
+    parent.add(group);
+    if (animations && animations.length > 0) {
+      this.landmarkAnims.push(...animations);
     }
-
-    parent.add(g);
   }
 
   buildDice() {
@@ -1072,7 +969,7 @@ export class Scene3D {
       this.resetCamera();
     } else {
       this.orbit.desiredPhi = 0.85;
-      this.orbit.desiredRadius = 42;
+      this.orbit.desiredRadius = 45;
       this.orbit.desiredTarget.set(0, 1.5, 0);
     }
   }
@@ -1080,7 +977,7 @@ export class Scene3D {
   resetCamera() {
     this.orbit.desiredTheta = Math.PI / 2;
     this.orbit.desiredPhi = 0.78;
-    this.orbit.desiredRadius = 39;
+    this.orbit.desiredRadius = 42;
     this.orbit.desiredTarget.set(0, 1.3, 1.2);
     this.orbit.userControlledUntil = 0;
   }
@@ -1089,7 +986,7 @@ export class Scene3D {
     if (Date.now() < this.orbit.userControlledUntil) return;
     const pos = tileWorldPos(tileId, R_MID);
     this.orbit.desiredTarget.set(pos.x * 0.44, 1.4, pos.z * 0.44);
-    this.orbit.desiredRadius = 31;
+    this.orbit.desiredRadius = 33;
     this.orbit.desiredPhi = 0.72;
   }
 
@@ -1099,7 +996,7 @@ export class Scene3D {
         this.scene.remove(p.group);
       }
       this.pawns.clear();
-      for (const tile of BOARD_TILES) {
+      for (const tile of this.currentBoard) {
         if (this.tileOwnersHash.get(tile.id) && this.tileOwnersHash.get(tile.id) !== 'none') {
           this.tileOwnersHash.set(tile.id, 'none');
           const mesh = this.tileMeshes.get(tile.id);
@@ -1117,8 +1014,15 @@ export class Scene3D {
       return;
     }
 
+    // 0. If this game uses a new randomized Indonesian board, rebuild the 40 board tiles & 3D landmarks!
+    if (Array.isArray(game.board) && game.board.length > 0 && game.boardSeed !== this.currentBoardSeed) {
+      this.populateBoardTiles(game.board, game.boardSeed);
+    }
+
+    const activeBoard = this.currentBoard;
+
     // 1. Update tiles, owner glowing pads & 3D buildings
-    for (const tile of BOARD_TILES) {
+    for (const tile of activeBoard) {
       const prop = game.properties?.[tile.id] || null;
       const owner = prop ? game.players.find((pl) => pl.id === prop.ownerId) : null;
       const ownerChar = owner ? getCharacterById(owner.characterId) : null;
@@ -1205,39 +1109,8 @@ export class Scene3D {
     while (group.children.length > 0) {
       group.remove(group.children[0]);
     }
-    const defProp = this.defaultProps.get(tileId);
-    if (defProp) defProp.visible = level <= 0;
     if (level <= 0) return;
-
-    const wallMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.6 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: ownerColor, roughness: 0.42 });
-    const goldMat = new THREE.MeshStandardMaterial({ color: '#facc15', metalness: 0.45, roughness: 0.35 });
-
-    if (level === 1) {
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.95, 0.85), wallMat);
-      body.position.y = 0.48;
-      body.castShadow = true;
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.25, 1.0), roofMat);
-      roof.position.y = 1.05;
-      group.add(body, roof);
-    } else if (level === 2) {
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.72, 0.95), wallMat);
-      body.position.y = 0.86;
-      body.castShadow = true;
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.24, 1.02), roofMat);
-      stripe.position.y = 1.76;
-      group.add(body, stripe);
-    } else if (level >= 3) {
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.25, 2.55, 1.0), wallMat);
-      body.position.y = 1.28;
-      body.castShadow = true;
-      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.96, 0.68, 4), roofMat);
-      cap.rotation.y = Math.PI / 4;
-      cap.position.y = 2.86;
-      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.25), goldMat);
-      star.position.y = 3.38;
-      group.add(body, cap, star);
-    }
+    group.add(buildUpgradeStructure(level, ownerColor));
   }
 
   animateDiceAndMove({ playerId, dice, fromPos, steps, toPos, toJail }) {
@@ -1387,6 +1260,24 @@ export class Scene3D {
 
     if (this.flagMesh) {
       this.flagMesh.rotation.y = Math.sin(elapsed * 4.2) * 0.16;
+    }
+
+    // Subtle ambient life animations on bespoke Indonesian tile landmarks!
+    for (const anim of this.landmarkAnims) {
+      if (anim.type === 'spin') {
+        anim.mesh.rotation.y = elapsed * anim.speed;
+      } else if (anim.type === 'spinZ') {
+        anim.mesh.rotation.z = elapsed * anim.speed;
+      } else if (anim.type === 'bob') {
+        anim.mesh.position.y = anim.baseY + Math.sin(elapsed * anim.speed + anim.phase) * anim.amp;
+      } else if (anim.type === 'pulse') {
+        const s = 0.85 + Math.abs(Math.sin(elapsed * anim.speed)) * 0.3;
+        anim.mesh.scale.setScalar(s);
+      } else if (anim.type === 'siren') {
+        const redOn = Math.floor(elapsed * 5.5) % 2 === 0;
+        anim.red.scale.setScalar(redOn ? 1.2 : 0.8);
+        anim.blue.scale.setScalar(redOn ? 0.8 : 1.2);
+      }
     }
 
     if (this.diceAnim) {

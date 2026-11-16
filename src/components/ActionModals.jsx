@@ -106,17 +106,24 @@ export default function ActionModals({
 
   // 3. BUY PROPERTY MODAL (only for active human player)
   if (isMyPending && pending.type === 'buy_property') {
-    const tile = getTileById(pending.tileId);
+    const tile = getTileById(pending.tileId, game.board);
     const groupMeta = COLOR_GROUPS[tile.group] || { label: 'Aset', color: tile.color };
     return (
       <div className="modal-backdrop light">
         <div className="kraft-card modal-card" style={{ maxWidth: 420 }}>
           <div className="deed-header" style={{ background: tile.color || '#334155' }}>
-            <span className="deed-group">{groupMeta.label}</span>
+            <span className="deed-group">
+              {groupMeta.label}{tile.province ? ` · ${tile.province}` : ''}
+            </span>
             <h3 className="deed-name">{tile.name}</h3>
           </div>
 
           <div className="deed-body">
+            {tile.flavor && (
+              <p style={{ margin: '0 0 10px', fontSize: 12.5, opacity: 0.85, lineHeight: 1.4 }}>
+                {tile.flavor}
+              </p>
+            )}
             <div className="deed-price-row">
               <span>Harga Beli</span>
               <strong>{formatRupiah(tile.price)}</strong>
@@ -143,8 +150,8 @@ export default function ActionModals({
 
             {tile.type === 'utility' && (
               <div className="rent-table">
-                <div><span>1 Utilitas</span><strong>120 rb × angka dadu</strong></div>
-                <div><span>2 Utilitas (PLN+PDAM)</span><strong>250 rb × angka dadu</strong></div>
+                <div><span>1 Utilitas BUMN</span><strong>120 rb × angka dadu</strong></div>
+                <div><span>2 Utilitas BUMN</span><strong>250 rb × angka dadu</strong></div>
               </div>
             )}
           </div>
@@ -165,7 +172,7 @@ export default function ActionModals({
 
   // 4. UPGRADE PROPERTY MODAL
   if (isMyPending && pending.type === 'upgrade_property') {
-    const tile = getTileById(pending.tileId);
+    const tile = getTileById(pending.tileId, game.board);
     const levelNames = ['Tanah', 'Ruko', 'Gedung', 'Landmark'];
     const nextLvl = pending.level + 1;
     return (

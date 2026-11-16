@@ -3,9 +3,10 @@ import { X, ArrowLeftRight, Check, Ban } from 'lucide-react';
 import { BOARD_TILES, formatRupiah, formatShortRupiah } from '../../shared/boardData.js';
 import AvatarIcon from './AvatarIcon.jsx';
 
-export function IncomingTradeModal({ trade, onRespond }) {
+export function IncomingTradeModal({ trade, board, onRespond }) {
   if (!trade) return null;
-  const tileName = (id) => BOARD_TILES.find((t) => t.id === id)?.name || `Petak #${id}`;
+  const tiles = board?.length ? board : BOARD_TILES;
+  const tileName = (id) => tiles.find((t) => t.id === id)?.name || `Petak #${id}`;
   return (
     <div className="modal-backdrop">
       <div className="kraft-card modal-card" style={{ maxWidth: 460 }}>
@@ -65,8 +66,9 @@ export default function TradeModal({ game, myId, onPropose, onClose }) {
   const [requestMoney, setRequestMoney] = useState(0);
 
   const target = targets.find((t) => t.id === targetId);
-  const myTiles = BOARD_TILES.filter((t) => game.properties?.[t.id]?.ownerId === myId);
-  const targetTiles = BOARD_TILES.filter((t) => game.properties?.[t.id]?.ownerId === targetId);
+  const board = game.board?.length ? game.board : BOARD_TILES;
+  const myTiles = board.filter((t) => game.properties?.[t.id]?.ownerId === myId);
+  const targetTiles = board.filter((t) => game.properties?.[t.id]?.ownerId === targetId);
 
   const toggle = (list, setter, id) => {
     setter(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
