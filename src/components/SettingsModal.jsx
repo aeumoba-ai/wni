@@ -119,7 +119,7 @@ export default function SettingsModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop settings-modal-backdrop" onClick={onClose}>
       <div
         className="kraft-card modal-card settings-modal-card"
         onClick={(e) => e.stopPropagation()}

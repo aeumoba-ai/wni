@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BOARD_TILES, DEFAULT_BOARD_SEED, TOTAL_TILES, formatShortRupiah } from '../../shared/boardData.js';
+import { BOARD_TILES, DEFAULT_BOARD_SEED, TOTAL_TILES, JAIL_TILE_ID, formatShortRupiah } from '../../shared/boardData.js';
 import { getCharacterById } from '../../shared/characters.js';
 import { soundEngine } from './SoundEngine.js';
 import { buildTileLandmark, buildUpgradeStructure } from './Landmarks3D.js';
@@ -311,9 +311,10 @@ function makeBuildingWindowTexture(baseHex) {
 }
 
 export class Scene3D {
-  constructor(container, onSelectTile = null) {
+  constructor(container, onSelectTile = null, onCinematicChange = null) {
     this.container = container;
     this.onSelectTile = onSelectTile;
+    this.onCinematicChange = onCinematicChange;
     this.mode = 'lobby';
     this.disposed = false;
     this.raycaster = new THREE.Raycaster();
@@ -351,6 +352,12 @@ export class Scene3D {
       userControlledUntil: 0,
     };
 
+    // Temporary cinematic mode: hides obstructing UI + follows the moving pawn,
+    // then restores the EXACT camera the player had (never a hard reset).
+    this.cinematic = null;
+    this._cinematicNotified = false;
+    this.isCompactViewport = false;
+
     this.currentBoard = BOARD_TILES;
     this.currentBoardSeed = DEFAULT_BOARD_SEED;
     this.smoothAnimation = false; // Default OFF (animasi standar); toggleable in Settings!
@@ -380,6 +387,11 @@ export class Scene3D {
 
     this.onResize = this.handleResize.bind(this);
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('orientationchange', this.onResize);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', this.onResize);
+    this.resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(this.onResize) : null;
+    this.resizeObserver?.observe(container);
+    this.handleResize();
 
     // Re-render all 40 3D tile textures crisp once the self-hosted theme fonts finish loading!
     if (typeof document !== 'undefined' && document.fonts?.load) {
@@ -1006,6 +1018,10 @@ export class Scene3D {
   }
 
   setMode(mode) {
+    // IMPORTANT: App re-runs this on EVERY room state update (chat, timer, etc.).
+    // Only reset the camera on an actual lobby <-> game transition, otherwise the
+    // player's manually rotated/zoomed camera would be wiped constantly.
+    if (this.mode === mode) return;
     this.mode = mode;
     if (mode === 'game') {
       this.resetCamera();
@@ -1014,6 +1030,113 @@ export class Scene3D {
       this.orbit.desiredRadius = 45;
       this.orbit.desiredTarget.set(0, 1.5, 0);
     }
+    // A pending cinematic snapshot from the other mode is stale — re-baseline it.
+    if (this.cinematic) {
+      this.cinematic.snapshot = this.captureCameraSnapshot();
+      this.cinematic.snapshotMode = mode;
+    }
+  }
+
+  // ==================== TEMPORARY CINEMATIC PRESENTATION MODE ====================
+  captureCameraSnapshot() {
+    const o = this.orbit;
+    return {
+      theta: o.theta,
+      phi: o.phi,
+      radius: o.radius,
+      target: o.target.clone(),
+      desiredTheta: o.desiredTheta,
+      desiredPhi: o.desiredPhi,
+      desiredRadius: o.desiredRadius,
+      desiredTarget: o.desiredTarget.clone(),
+      userControlledUntil: o.userControlledUntil,
+    };
+  }
+
+  isCinematic() {
+    return Boolean(this.cinematic && this.cinematic.entries.size > 0);
+  }
+
+  beginCinematic(key, opts = {}) {
+    if (this.disposed) return;
+    const now = performance.now();
+    const duration = Math.max(450, Math.min(9000, opts.duration || 1800));
+    if (!this.cinematic) {
+      this.cinematic = {
+        snapshot: this.captureCameraSnapshot(),
+        snapshotMode: this.mode,
+        entries: new Map(),
+        userOverride: false,
+      };
+    }
+    const prev = this.cinematic.entries.get(key);
+    if (prev?.timer) clearTimeout(prev.timer);
+    // Wall-clock safety timer: requestAnimationFrame pauses in background tabs,
+    // so this guarantees the UI is never left hidden forever.
+    const timer = setTimeout(() => this.endCinematic(key), duration + 180);
+    this.cinematic.entries.set(key, {
+      expiresAt: now + duration,
+      timer,
+      kind: opts.kind || 'animation',
+      focus: opts.focus || null,
+    });
+    this.notifyCinematic();
+  }
+
+  endCinematic(key) {
+    const c = this.cinematic;
+    if (!c) return;
+    const entry = c.entries.get(key);
+    if (entry?.timer) clearTimeout(entry.timer);
+    c.entries.delete(key);
+    if (c.entries.size === 0) this.finishCinematic();
+    else this.notifyCinematic();
+  }
+
+  finishCinematic() {
+    const c = this.cinematic;
+    if (!c) return;
+    for (const entry of c.entries.values()) {
+      if (entry.timer) clearTimeout(entry.timer);
+    }
+    this.cinematic = null;
+    // Any scripted camera move ends together with the presentation.
+    this.cameraCutscene = null;
+    if (!c.userOverride && this.mode === 'game' && c.snapshotMode === this.mode) {
+      const s = c.snapshot;
+      const o = this.orbit;
+      // Restore the EXACT previous desired camera state (angle, zoom & target).
+      // The existing damping then glides back — no resetCamera(), no jump.
+      o.desiredTheta = s.desiredTheta;
+      o.desiredPhi = s.desiredPhi;
+      o.desiredRadius = s.desiredRadius;
+      o.desiredTarget.copy(s.desiredTarget);
+      o.userControlledUntil = s.userControlledUntil;
+    }
+    this.notifyCinematic();
+  }
+
+  notifyCinematic() {
+    const active = this.isCinematic();
+    if (active === this._cinematicNotified) return;
+    this._cinematicNotified = active;
+    try {
+      this.onCinematicChange?.(active);
+    } catch {
+      // React unmount race — ignore.
+    }
+  }
+
+  getCinematicFocus() {
+    const c = this.cinematic;
+    if (!c || c.userOverride) return null;
+    let chosen = null;
+    for (const entry of c.entries.values()) {
+      if (!entry.focus) continue;
+      if (entry.focus.kind === 'pawn') return entry.focus; // pawn motion wins
+      chosen = entry.focus;
+    }
+    return chosen;
   }
 
   setSmoothAnimation(enabled) {
@@ -1021,6 +1144,7 @@ export class Scene3D {
     if (!this.smoothAnimation) {
       this.cameraCutscene = null;
       this.screenShake = 0;
+      this.finishCinematic();
       this.clearParticles();
       for (const pawn of this.pawns.values()) {
         pawn.group.scale.set(1, 1, 1);
@@ -1219,6 +1343,7 @@ export class Scene3D {
   }
 
   focusTile(tileId) {
+    if (this.cinematic && !this.cinematic.userOverride) return;
     if (Date.now() < this.orbit.userControlledUntil) return;
     const pos = tileWorldPos(tileId, R_MID);
     this.orbit.desiredTarget.set(pos.x * 0.44, 1.4, pos.z * 0.44);
@@ -1379,15 +1504,29 @@ export class Scene3D {
       ],
     };
 
-    if (this.smoothAnimation && Date.now() >= this.orbit.userControlledUntil) {
-      // Smooth dynamic zoom toward center while dice roll
-      this.orbit.desiredTarget.set(0, 1.5, 0.7);
-      this.orbit.desiredRadius = 27.5;
-      this.orbit.desiredPhi = 0.74;
-    }
-
     const pawn = this.pawns.get(playerId);
     if (!pawn) return;
+
+    const hopDuration = this.smoothAnimation ? 200 : 185;
+    const stepCount = Math.max(1, Number(steps) || 0);
+    // Dice settle starts the pawn after 880ms. Keep UI hidden through the last
+    // hop plus a short camera-restoration tail, not an arbitrary extra delay.
+    const presentationMs = Math.min(
+      6800,
+      toJail ? 1500 : 880 + stepCount * hopDuration + 420
+    );
+    this.beginCinematic('pawn_move', {
+      duration: presentationMs,
+      kind: 'pawn_move',
+      focus: {
+        kind: 'pawn',
+        playerId,
+        tileId: toJail ? JAIL_TILE_ID : toPos,
+        radius: this.isCompactViewport ? 32 : 26.5,
+        strength: this.isCompactViewport ? 0.52 : 0.66,
+        phi: this.isCompactViewport ? 0.82 : 0.76,
+      },
+    });
 
     if (toJail) {
       setTimeout(() => {
@@ -1405,15 +1544,23 @@ export class Scene3D {
           delayUntil: s === 1 ? performance.now() + 880 : 0,
         });
       }
-      if (!this.smoothAnimation) {
-        this.focusTile(toPos);
-      }
     }
   }
 
   teleportPawn(playerId, toPos) {
     const pawn = this.pawns.get(playerId);
     if (!pawn) return;
+    this.beginCinematic('pawn_teleport', {
+      duration: 1300,
+      kind: 'pawn_teleport',
+      focus: {
+        kind: 'tile',
+        tileId: toPos,
+        radius: this.isCompactViewport ? 32 : 27,
+        strength: this.isCompactViewport ? 0.52 : 0.64,
+        phi: this.isCompactViewport ? 0.82 : 0.76,
+      },
+    });
     pawn.hopQueue = [];
     pawn.currentHop = null;
     pawn.tileId = toPos;
@@ -1426,63 +1573,127 @@ export class Scene3D {
   bindControls() {
     const el = this.renderer.domElement;
     el.style.touchAction = 'none';
+    const pointers = new Map();
     let downX = 0;
     let downY = 0;
+    let dragDist = 0;
+    let pinch = null;
+    let gestureWasPinch = false;
+
+    const markUserOverride = () => {
+      if (this.cinematic) this.cinematic.userOverride = true;
+      // If the player deliberately takes over camera control during a cutscene,
+      // never let the scripted camera continue fighting their gesture.
+      this.cameraCutscene = null;
+    };
+    const clampRadius = (r) => Math.max(20, Math.min(54, r));
 
     const onDown = (e) => {
       if (this.mode !== 'game') return;
-      this.orbit.dragging = true;
-      this.orbit.lastX = e.clientX;
-      this.orbit.lastY = e.clientY;
-      downX = e.clientX;
-      downY = e.clientY;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) {
+        this.orbit.dragging = true;
+        this.orbit.lastX = e.clientX;
+        this.orbit.lastY = e.clientY;
+        downX = e.clientX;
+        downY = e.clientY;
+        dragDist = 0;
+        gestureWasPinch = false;
+        try {
+          el.setPointerCapture?.(e.pointerId);
+        } catch {
+          // Ignore capture failures on older browsers.
+        }
+      } else if (pointers.size === 2) {
+        const [a, b] = Array.from(pointers.values());
+        pinch = {
+          dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+          radius: this.orbit.desiredRadius,
+        };
+        gestureWasPinch = true;
+        this.orbit.dragging = false;
+        markUserOverride();
+      }
     };
+
     const onMove = (e) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      // Two-finger pinch zoom (mobile / tablet) — no mouse wheel needed.
+      if (pointers.size >= 2 && pinch) {
+        const [a, b] = Array.from(pointers.values());
+        const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+        this.orbit.desiredRadius = clampRadius(pinch.radius * (pinch.dist / dist));
+        this.orbit.userControlledUntil = Date.now() + 6000;
+        markUserOverride();
+        return;
+      }
+
       if (!this.orbit.dragging) return;
       const dx = e.clientX - this.orbit.lastX;
       const dy = e.clientY - this.orbit.lastY;
       this.orbit.lastX = e.clientX;
       this.orbit.lastY = e.clientY;
+      dragDist += Math.hypot(dx, dy);
+      // Only a real drag (not a tap) takes the camera back from the cinematic.
+      if (dragDist > 8) markUserOverride();
       this.orbit.desiredTheta += dx * 0.0065;
       this.orbit.desiredPhi = Math.max(0.32, Math.min(1.22, this.orbit.desiredPhi - dy * 0.0055));
       this.orbit.userControlledUntil = Date.now() + 6000;
     };
+
     const onUp = (e) => {
+      const hadPointer = pointers.has(e.pointerId);
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
       const wasDragging = this.orbit.dragging;
-      this.orbit.dragging = false;
-      if (wasDragging && this.mode === 'game' && this.onSelectTile) {
-        const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
-        if (dist < 6) {
-          const rect = el.getBoundingClientRect();
-          this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-          this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-          this.raycaster.setFromCamera(this.pointer, this.camera);
-          const hits = this.raycaster.intersectObjects(Array.from(this.tileMeshes.values()), false);
-          if (hits.length > 0 && hits[0].object?.userData?.tileId !== undefined) {
-            this.onSelectTile(hits[0].object.userData.tileId);
-          } else {
-            this.onSelectTile(null);
-          }
+      if (pointers.size === 0) this.orbit.dragging = false;
+
+      if (
+        hadPointer &&
+        wasDragging &&
+        pointers.size === 0 &&
+        !gestureWasPinch &&
+        dragDist < 8 &&
+        this.mode === 'game' &&
+        this.onSelectTile
+      ) {
+        const rect = el.getBoundingClientRect();
+        this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        this.raycaster.setFromCamera(this.pointer, this.camera);
+        const hits = this.raycaster.intersectObjects(Array.from(this.tileMeshes.values()), false);
+        if (hits.length > 0 && hits[0].object?.userData?.tileId !== undefined) {
+          this.onSelectTile(hits[0].object.userData.tileId);
+        } else {
+          this.onSelectTile(null);
         }
       }
+      if (pointers.size === 0) gestureWasPinch = false;
     };
+
     const onWheel = (e) => {
       if (this.mode !== 'game') return;
       e.preventDefault();
-      this.orbit.desiredRadius = Math.max(20, Math.min(54, this.orbit.desiredRadius + e.deltaY * 0.025));
+      this.orbit.desiredRadius = clampRadius(this.orbit.desiredRadius + e.deltaY * 0.025);
       this.orbit.userControlledUntil = Date.now() + 6000;
+      markUserOverride();
     };
 
     el.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     el.addEventListener('wheel', onWheel, { passive: false });
 
     this._cleanupControls = () => {
       el.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       el.removeEventListener('wheel', onWheel);
+      pointers.clear();
     };
   }
 
@@ -1492,6 +1703,15 @@ export class Scene3D {
     const h = this.container.clientHeight || window.innerHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    // Portrait phones need a wider FOV so the whole 40-tile board stays visible
+    // without touching orbit state (so camera restore stays pixel-exact).
+    const aspect = w / Math.max(1, h);
+    this.isCompactViewport = aspect < 0.95;
+    this.camera.aspect = aspect;
+    this.camera.fov = aspect < 0.72 ? 54 : aspect < 0.95 ? 47 : 40;
+    this.camera.updateProjectionMatrix();
+    // Cap DPR on phones for smooth 60fps WebGL instead of overheating the GPU.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.isCompactViewport ? 1.6 : 2));
     this.renderer.setSize(w, h);
   }
 
@@ -1596,7 +1816,12 @@ export class Scene3D {
             tileId: next.tileId,
           };
           soundEngine.playHop(next.stepIdx);
-          if (this.smoothAnimation && Date.now() >= this.orbit.userControlledUntil && !this.cameraCutscene) {
+          if (
+            this.smoothAnimation &&
+            !this.isCinematic() &&
+            Date.now() >= this.orbit.userControlledUntil &&
+            !this.cameraCutscene
+          ) {
             this.focusTile(next.tileId);
           }
         }
@@ -1728,6 +1953,31 @@ export class Scene3D {
       if (t >= 1) {
         this.cameraCutscene = null;
       }
+    } else if (this.cinematic && !this.cinematic.userOverride && !this.orbit.dragging) {
+      const focus = this.getCinematicFocus();
+      if (focus) {
+        let pos = null;
+        if (focus.playerId) {
+          const pawn = this.pawns.get(focus.playerId);
+          if (pawn) pos = pawn.group.position;
+        }
+        if (!pos && typeof focus.tileId === 'number') {
+          pos = tileWorldPos(focus.tileId, R_MID);
+        }
+        if (pos) {
+          const o = this.orbit;
+          const k = focus.strength ?? 0.66;
+          o.desiredTarget.set(pos.x * k, 1.5, pos.z * k);
+          o.desiredRadius = focus.radius ?? 26.5;
+          o.desiredPhi = focus.phi ?? 0.76;
+          // Aim the camera from outside the pawn's angle, using the shortest
+          // rotation so the board never spins the long way around.
+          let desired = Math.atan2(pos.z, pos.x) + 0.2;
+          while (desired - o.theta > Math.PI) desired -= Math.PI * 2;
+          while (desired - o.theta < -Math.PI) desired += Math.PI * 2;
+          o.desiredTheta = desired;
+        }
+      }
     }
 
     const damp = this.smoothAnimation ? 1 - Math.exp(-dt * 4.8) : Math.min(1, dt * 6);
@@ -1762,6 +2012,15 @@ export class Scene3D {
     cancelAnimationFrame(this.rafId);
     this.clearParticles();
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('orientationchange', this.onResize);
+    if (window.visualViewport) window.visualViewport.removeEventListener('resize', this.onResize);
+    this.resizeObserver?.disconnect();
+    if (this.cinematic) {
+      for (const entry of this.cinematic.entries.values()) {
+        if (entry.timer) clearTimeout(entry.timer);
+      }
+      this.cinematic = null;
+    }
     if (this._cleanupControls) this._cleanupControls();
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode === this.container) {

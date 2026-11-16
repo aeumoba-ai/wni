@@ -3416,3 +3416,513 @@ body,
     display: none;
   }
 }
+
+/* ============================================================================
+   TEMPORARY CINEMATIC MODE
+   Added by Scene3D whenever a pawn moves or a cutscene plays. The obstructing
+   UI fades out ONLY for the duration of the animation, then fades back in.
+   The cutscene overlay itself (z-index 62/65) always stays visible/clickable.
+   ============================================================================ */
+@keyframes cinematicVignetteIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hud-layer,
+.tile-inspector-card,
+.side-drawer,
+.global-toast,
+.modal-backdrop:not(.settings-modal-backdrop) {
+  transition: opacity 0.32s ease, filter 0.32s ease;
+}
+
+.cinematic-active .hud-layer,
+.cinematic-active .tile-inspector-card,
+.cinematic-active .side-drawer,
+.cinematic-active .global-toast,
+.cinematic-active .modal-backdrop:not(.settings-modal-backdrop) {
+  opacity: 0 !important;
+  filter: blur(2px);
+  pointer-events: none !important;
+}
+
+/* Children explicitly opt back into pointer-events, so disable them too. */
+.cinematic-active .hud-layer *,
+.cinematic-active .tile-inspector-card *,
+.cinematic-active .side-drawer *,
+.cinematic-active .modal-backdrop:not(.settings-modal-backdrop) * {
+  pointer-events: none !important;
+}
+
+/* Soft vignette while a pawn is moving (cutscenes already have letterboxing). */
+.cinematic-active:not(.has-cutscene)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(9, 16, 27, 0.3) 100%);
+  animation: cinematicVignetteIn 0.3s ease both;
+}
+
+/* ============================================================================
+   100% MOBILE / TOUCH ADAPTATION
+   Safe-area insets, dynamic viewport height, one-hand-friendly HUD,
+   horizontally scrollable player pills, 16px inputs (no iOS zoom), bigger
+   tap targets, pinch-zoom friendly canvas and mobile cutscene scaling.
+   ============================================================================ */
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh;
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  touch-action: manipulation;
+}
+
+.app-root {
+  height: 100%;
+  height: 100dvh;
+  max-width: 100vw;
+  overflow: hidden;
+}
+
+.lobby-overlay {
+  padding:
+    calc(14px + env(safe-area-inset-top, 0px))
+    calc(14px + env(safe-area-inset-right, 0px))
+    calc(14px + env(safe-area-inset-bottom, 0px))
+    calc(14px + env(safe-area-inset-left, 0px));
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lobby-card,
+.waiting-card,
+.modal-card {
+  max-width: min(100%, calc(100vw - 28px));
+  max-height: 94dvh;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+}
+
+.modal-backdrop {
+  padding:
+    calc(16px + env(safe-area-inset-top, 0px))
+    calc(16px + env(safe-area-inset-right, 0px))
+    calc(16px + env(safe-area-inset-bottom, 0px))
+    calc(16px + env(safe-area-inset-left, 0px));
+}
+
+.modal-card {
+  max-height: 92dvh;
+}
+
+.settings-scroll-body {
+  max-height: 66dvh;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.hud-layer {
+  padding:
+    calc(12px + env(safe-area-inset-top, 0px))
+    calc(14px + env(safe-area-inset-right, 0px))
+    calc(12px + env(safe-area-inset-bottom, 0px))
+    calc(14px + env(safe-area-inset-left, 0px));
+}
+
+/* Inputs must be >=16px on iOS or Safari auto-zooms the whole page. */
+.kraft-input,
+.kraft-input.sm,
+input[type='text'],
+textarea {
+  font-size: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+@media (max-width: 980px) {
+  .hud-top {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+  }
+
+  .hud-round-pill {
+    align-self: flex-start;
+    padding: 5px 10px;
+  }
+
+  .hud-players-row {
+    flex: 1 1 auto;
+    width: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: visible;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  .hud-players-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hud-player-wrap {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  .hud-right-group {
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .hud-right-group::-webkit-scrollbar {
+    display: none;
+  }
+
+  .dock-card {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .hud-player-pill {
+    min-width: 122px;
+    padding: 4px 8px 4px 5px;
+  }
+
+  .hud-player-name {
+    font-size: 10.5px;
+  }
+
+  .hud-player-money {
+    font-size: 12px;
+  }
+
+  .hud-round-label {
+    font-size: 11px;
+  }
+
+  .kas-label {
+    font-size: 9px;
+  }
+
+  .kas-val {
+    font-size: 13px;
+  }
+
+  .dock-card {
+    padding: 10px 11px;
+  }
+
+  .dock-prompt {
+    font-size: 11px;
+  }
+
+  .btn-roll {
+    min-height: 50px;
+    font-size: 15px;
+    padding: 11px 14px;
+  }
+
+  .dice-gauge {
+    height: 34px;
+  }
+
+  .tile-inspector-card {
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    right: auto;
+    bottom: calc(168px + env(safe-area-inset-bottom, 0px));
+    width: min(230px, calc(100vw - 24px));
+    z-index: 26;
+  }
+
+  .side-drawer {
+    width: min(88vw, 340px);
+    max-width: 88vw;
+  }
+
+  .invite-code-value {
+    font-size: 24px;
+    letter-spacing: 3px;
+  }
+
+  .waiting-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .waiting-title {
+    font-size: 21px;
+  }
+
+  .seat-row {
+    padding: 6px 8px;
+  }
+
+  .tab-bar {
+    gap: 3px;
+  }
+
+  .tab-btn {
+    font-size: 11.5px;
+    padding: 8px 4px;
+  }
+
+  .main-settings-btn {
+    padding: 9px 10px;
+  }
+
+  .main-settings-title {
+    font-size: 16px;
+  }
+
+  .count-btn,
+  .mini-pill,
+  .vis-btn,
+  .pion-btn,
+  .tab-btn,
+  .btn-small-navy,
+  .btn-small-tan,
+  .icon-close-btn,
+  .hud-circle-btn {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .game-logo {
+    font-size: clamp(24px, 7.4vw, 30px);
+  }
+
+  .lobby-card,
+  .waiting-card,
+  .modal-card {
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+
+  .hud-layer {
+    padding-left: calc(9px + env(safe-area-inset-left, 0px));
+    padding-right: calc(9px + env(safe-area-inset-right, 0px));
+  }
+
+  .hud-player-pill {
+    min-width: 112px;
+  }
+
+  .hud-icon-cluster {
+    gap: 4px;
+  }
+
+  .hud-circle-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  .room-code-chip {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+
+  .kas-pill {
+    padding: 4px 8px;
+  }
+
+  .dock-prompt-row {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .pion-grid {
+    gap: 5px;
+  }
+
+  .invite-code-banner {
+    padding: 10px 11px;
+  }
+
+  .invite-actions {
+    gap: 5px;
+  }
+
+  .btn-invite-primary,
+  .btn-invite-secondary,
+  .btn-invite-wa {
+    padding: 8px 9px;
+    font-size: 11.5px;
+  }
+
+  .settings-modal-footer {
+    flex-wrap: wrap;
+  }
+
+  /* Mobile letterbox + banner scale so the cutscene never clips. */
+  .cutscene-letterbox {
+    height: min(7vh, 44px);
+  }
+
+  .cutscene-major-root {
+    padding: 12px;
+  }
+
+  .cutscene-major-banner {
+    width: min(560px, calc(100vw - 26px));
+    padding: 16px 15px 13px;
+    border-width: 3px;
+    gap: 7px;
+  }
+
+  .cutscene-avatar-ring {
+    width: 64px;
+    height: 64px;
+  }
+
+  .cutscene-title {
+    font-size: clamp(20px, 6.4vw, 27px);
+  }
+
+  .cutscene-subtitle {
+    font-size: 12px;
+  }
+
+  .cutscene-ribbon-wrap {
+    bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+    width: calc(100vw - 24px);
+  }
+
+  .cutscene-ribbon-card {
+    min-width: 0;
+    width: 100%;
+    padding: 9px 11px 13px 10px;
+    gap: 9px;
+  }
+
+  .cutscene-ribbon-avatar {
+    width: 42px;
+    height: 42px;
+  }
+
+  .cutscene-ribbon-title {
+    font-size: 15px;
+  }
+
+  .cutscene-ribbon-sub {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 380px) {
+  .hud-player-pill {
+    min-width: 104px;
+  }
+
+  .main-settings-chip:nth-child(3) {
+    display: none;
+  }
+
+  .cutscene-avatar-ring {
+    width: 54px;
+    height: 54px;
+  }
+}
+
+/* Landscape phones / short windows: keep the board visible, trim chrome. */
+@media (max-height: 520px) {
+  .hud-layer {
+    padding-top: calc(6px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .hud-status-line {
+    display: none;
+  }
+
+  .hud-player-pill {
+    min-width: 108px;
+  }
+
+  .dock-card {
+    padding: 7px 10px;
+  }
+
+  .dock-prompt-row {
+    margin-bottom: 4px;
+  }
+
+  .btn-roll {
+    min-height: 42px;
+    padding: 7px 12px;
+    margin-bottom: 5px;
+  }
+
+  .dice-gauge {
+    height: 28px;
+  }
+
+  .tile-inspector-card {
+    bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .cutscene-letterbox {
+    height: min(6vh, 30px);
+  }
+
+  .cutscene-avatar-ring {
+    width: 52px;
+    height: 52px;
+  }
+
+  .cutscene-major-banner {
+    padding: 11px 14px 10px;
+  }
+}
+
+/* Coarse pointers get generously sized tap targets. */
+@media (hover: none) and (pointer: coarse) {
+  button {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .hud-circle-btn,
+  .icon-close-btn,
+  .btn-small-navy,
+  .btn-small-tan,
+  .tab-btn,
+  .count-btn,
+  .mini-pill {
+    min-height: 42px;
+  }
+
+  .btn-roll {
+    touch-action: none;
+  }
+}
+
+/* Respect reduced-motion users: no auto-fade jank, no infinite glow. */
+@media (prefers-reduced-motion: reduce) {
+  .cinematic-active:not(.has-cutscene)::after {
+    animation: none;
+  }
+
+  .smooth-anim-on .hud-player-pill.active {
+    animation: none;
+  }
+}

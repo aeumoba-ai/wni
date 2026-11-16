@@ -70,6 +70,13 @@ export default function GameHUD({
   const startHold = (e) => {
     if (!canRoll) return;
     e.preventDefault();
+    // Keep the pointer captured on touch devices so a small finger drift does
+    // not fire pointerleave and accidentally release the dice gauge early.
+    try {
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    } catch {
+      // Older browsers ignore capture — the existing handlers still work.
+    }
     holdRef.current.active = true;
     holdRef.current.pos = 6;
     holdRef.current.dir = 1;
@@ -286,12 +293,10 @@ export default function GameHUD({
             disabled={!canRoll}
             onPointerDown={startHold}
             onPointerUp={releaseHold}
-            onPointerLeave={() => {
-              if (holdRef.current.active) releaseHold();
-            }}
             onPointerCancel={() => {
               if (holdRef.current.active) releaseHold();
             }}
+            onContextMenu={(e) => e.preventDefault()}
           >
             <div className="btn-roll-inner">
               <Dices size={19} />

@@ -69,6 +69,7 @@ export default function App() {
   const [audioSettings, setAudioSettings] = useState(() => soundEngine.getSettings());
   const [smoothAnimation, setSmoothAnimation] = useState(loadSmoothAnimationPref);
   const [activeCutscene, setActiveCutscene] = useState(null);
+  const [cinematicActive, setCinematicActive] = useState(false);
   const [dialogues, setDialogues] = useState({});
   const [moneyDeltas, setMoneyDeltas] = useState({});
 
@@ -76,6 +77,7 @@ export default function App() {
   const sceneRef = useRef(null);
   const clientRef = useRef(null);
   const cutsceneTimerRef = useRef(null);
+  const cutsceneKeyRef = useRef(null);
   const smoothAnimRef = useRef(smoothAnimation);
   smoothAnimRef.current = smoothAnimation;
   const showChatRef = useRef(showChat);
@@ -85,6 +87,10 @@ export default function App() {
     if (cutsceneTimerRef.current) {
       clearTimeout(cutsceneTimerRef.current);
       cutsceneTimerRef.current = null;
+    }
+    if (cutsceneKeyRef.current) {
+      sceneRef.current?.endCinematic(cutsceneKeyRef.current);
+      cutsceneKeyRef.current = null;
     }
     setActiveCutscene(null);
   }, []);
@@ -99,9 +105,28 @@ export default function App() {
       const duration = payload.duration || 1800;
       const item = { ...payload, id: `cs_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, duration };
       setActiveCutscene(item);
+
+      // One cinematic session per cutscene: hides obstructing UI temporarily and
+      // lets the 3D camera choreograph, then restores the previous camera exactly.
+      if (cutsceneKeyRef.current) sceneRef.current?.endCinematic(cutsceneKeyRef.current);
+      const key = `cutscene:${item.id}`;
+      cutsceneKeyRef.current = key;
+      sceneRef.current?.beginCinematic(key, {
+        duration: duration + 260,
+        kind: 'cutscene',
+        focus:
+          typeof payload.tileId === 'number'
+            ? { kind: 'tile', tileId: payload.tileId, radius: 27, strength: 0.6, phi: 0.78 }
+            : null,
+      });
+
       sceneRef.current?.playCutsceneCamera(payload.kind, payload.tileId ?? null, payload.accent);
       cutsceneTimerRef.current = setTimeout(() => {
         cutsceneTimerRef.current = null;
+        if (cutsceneKeyRef.current === key) {
+          cutsceneKeyRef.current = null;
+          sceneRef.current?.endCinematic(key);
+        }
         setActiveCutscene((prev) => (prev?.id === item.id ? null : prev));
       }, duration);
     },
@@ -161,9 +186,13 @@ export default function App() {
   // Mount Three.js 3D Scene
   useEffect(() => {
     if (!canvasMountRef.current) return;
-    const scene = new Scene3D(canvasMountRef.current, (tileId) => {
-      setSelectedTileId(tileId);
-    });
+    const scene = new Scene3D(
+      canvasMountRef.current,
+      (tileId) => {
+        setSelectedTileId(tileId);
+      },
+      (active) => setCinematicActive(Boolean(active))
+    );
     scene.setSmoothAnimation(smoothAnimRef.current);
     sceneRef.current = scene;
     return () => {
@@ -371,7 +400,11 @@ export default function App() {
       : null;
 
   return (
-    <div className={`app-root ${smoothAnimation ? 'smooth-anim-on' : ''}`}>
+    <div
+      className={`app-root ${smoothAnimation ? 'smooth-anim-on' : ''} ${
+        cinematicActive ? 'cinematic-active' : ''
+      } ${activeCutscene ? 'has-cutscene' : ''}`}
+    >
       <div ref={canvasMountRef} className="scene-canvas-container" />
 
       {toast && <div className="global-toast">{toast}</div>}
