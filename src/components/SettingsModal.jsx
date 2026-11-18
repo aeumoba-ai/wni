@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   Volume2,
@@ -21,6 +21,7 @@ import {
   Sun,
   SlidersHorizontal,
   Grid3X3,
+  Gauge,
 } from 'lucide-react';
 import { soundEngine } from '../game/SoundEngine.js';
 import { GRAPHICS_PRESETS, getEffectiveGraphicsSettings } from '../game/GraphicsSettings.js';
@@ -100,20 +101,34 @@ export default function SettingsModal({
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // The room object is replaced on every network update (chat, timer, dice...).
+  // Resetting the tab on those updates used to bounce the player straight back to
+  // RUANGAN, making the GRAFIK/AUDIO tabs impossible to stay on during a match.
+  // Only reset when the modal is (re)opened or the joined room actually changes.
+  const wasOpenRef = useRef(false);
+  const roomCodeRef = useRef(room?.code || null);
+
   useEffect(() => {
-    if (open) {
+    const roomCode = room?.code || null;
+    const justOpened = open && !wasOpenRef.current;
+    const roomChanged = open && roomCode !== roomCodeRef.current;
+    if (justOpened || roomChanged) {
       setActiveTab(room ? 'room' : 'audio');
     }
+    wasOpenRef.current = open;
+    roomCodeRef.current = roomCode;
   }, [open, room]);
 
   if (!open) return null;
 
   const { master, music, ui, sfx, muted, bgmOn } = audioSettings;
   const inviteUrl = room ? `${window.location.origin}${window.location.pathname}?room=${room.code}` : '';
-  const showRoomTab = Boolean(room) && activeTab === 'room';
-  const showAudioTab = activeTab === 'audio';
-  const showAnimTab = activeTab === 'anim';
-  const showGraphicsTab = activeTab === 'graphics';
+  // Never leave the body empty if the RUANGAN tab is selected while no room exists.
+  const currentTab = !room && activeTab === 'room' ? 'audio' : activeTab;
+  const showRoomTab = Boolean(room) && currentTab === 'room';
+  const showAudioTab = currentTab === 'audio';
+  const showAnimTab = currentTab === 'anim';
+  const showGraphicsTab = currentTab === 'graphics';
   const effectiveGraphics = getEffectiveGraphicsSettings(graphicsSettings);
 
   const copyText = async (text, setter) => {
@@ -136,7 +151,7 @@ export default function SettingsModal({
       <div
         className="kraft-card modal-card settings-modal-card"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: activeTab === 'graphics' || room ? 590 : 496 }}
+        style={{ maxWidth: currentTab === 'graphics' || room ? 590 : 496 }}
       >
         <div className="modal-header">
           <div>
@@ -157,7 +172,7 @@ export default function SettingsModal({
           {room && (
             <button
               type="button"
-              className={`tab-btn ${activeTab === 'room' ? 'active' : ''}`}
+              className={`tab-btn ${currentTab === 'room' ? 'active' : ''}`}
               onClick={() => setActiveTab('room')}
             >
               <Home size={14} />
@@ -166,7 +181,7 @@ export default function SettingsModal({
           )}
           <button
             type="button"
-            className={`tab-btn ${activeTab === 'audio' ? 'active' : ''}`}
+            className={`tab-btn ${currentTab === 'audio' ? 'active' : ''}`}
             onClick={() => setActiveTab('audio')}
           >
             <Volume2 size={14} />
@@ -174,7 +189,7 @@ export default function SettingsModal({
           </button>
           <button
             type="button"
-            className={`tab-btn ${activeTab === 'anim' ? 'active' : ''}`}
+            className={`tab-btn ${currentTab === 'anim' ? 'active' : ''}`}
             onClick={() => setActiveTab('anim')}
           >
             <Clapperboard size={14} />
@@ -185,7 +200,7 @@ export default function SettingsModal({
           </button>
           <button
             type="button"
-            className={`tab-btn ${activeTab === 'graphics' ? 'active' : ''}`}
+            className={`tab-btn ${currentTab === 'graphics' ? 'active' : ''}`}
             onClick={() => setActiveTab('graphics')}
             aria-label="Pengaturan grafik game"
           >

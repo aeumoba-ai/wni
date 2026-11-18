@@ -13,7 +13,13 @@ import {
 const PEER_PREFIX = 'monopoli-konoha-wni-v1-';
 const BC_CHANNEL_NAME = 'monopoli-konoha-wni-local-v1';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const MAX_PACKET_BYTES = 8192;
+// Guest -> host RPC payloads are always small, so a tight cap keeps the host
+// safe from memory-spam attacks. Authoritative host -> guest `room_update`
+// snapshots, however, legitimately weigh 20-60 KB once the 40-tile board, all
+// properties, players and logs are serialized. They used to be rejected by the
+// same 8 KB guard, so guests never received the game and saw an empty screen.
+const MAX_PACKET_BYTES = 8 * 1024;
+const MAX_STATE_PACKET_BYTES = 512 * 1024;
 const MAX_PASSWORD_FAILS = 5;
 const PASSWORD_LOCKOUT_MS = 30_000;
 const CHAT_COOLDOWN_MS = 700;
@@ -41,12 +47,18 @@ function isValidGuestId(id) {
   return typeof id === 'string' && /^[a-zA-Z0-9_-]{6,64}$/.test(id) && !id.startsWith('bot_');
 }
 
-function isOversizedPacket(msg) {
+function isOversizedPacket(msg, limit = MAX_PACKET_BYTES) {
   try {
-    return JSON.stringify(msg).length > MAX_PACKET_BYTES;
+    return JSON.stringify(msg).length > limit;
   } catch {
     return true;
   }
+}
+
+/** Host -> guest state snapshots are allowed a much larger budget than RPCs. */
+function isOversizedInboundPacket(msg) {
+  const limit = msg?.type === 'room_update' ? MAX_STATE_PACKET_BYTES : MAX_PACKET_BYTES;
+  return isOversizedPacket(msg, limit);
 }
 
 function makeRoomPreview(room) {
@@ -96,6 +108,7 @@ export class RoomClient {
     this.guestRoomCode = null;
     this.publicHeartbeat = null;
     this.netStatus = 'idle'; // 'idle' | 'connecting' | 'online' | 'local_only'
+    this.suspendRoomEmit = false; // true while a GameEngine is still being constructed
 
     if (this.bc) {
       this.bc.onmessage = (ev) => this.handleBroadcastMessage(ev.data);
@@ -303,6 +316,10 @@ export class RoomClient {
 
   emitHostRoom() {
     if (!this.room) return;
+    // The GameEngine constructor broadcasts immediately; skip that pre-assignment
+    // snapshot so guests never receive `status: 'playing'` with `game: null`
+    // (which rendered an empty, HUD-less screen for a moment).
+    if (this.suspendRoomEmit) return;
     const snap = this.serializeHostRoom();
     this.onRoomUpdate?.(snap);
     this.sendToAllGuests({ type: 'room_update', room: snap });
@@ -320,7 +337,11 @@ export class RoomClient {
           // ignore
         }
       } else if (info.via === 'bc' && this.bc) {
-        this.bc.postMessage({ ...packet, toTab: info.tabId, fromTab: this.tabId, code: this.room?.code });
+        try {
+          this.bc.postMessage({ ...packet, toTab: info.tabId, fromTab: this.tabId, code: this.room?.code });
+        } catch {
+          // A structured-clone failure must never break the host's own game loop.
+        }
       }
     }
   }
@@ -461,7 +482,7 @@ export class RoomClient {
 
     conn.on('data', (msg) => {
       if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
-      if (isOversizedPacket(msg)) {
+      if (isOversizedInboundPacket(msg)) {
         try {
           conn.close();
         } catch {
@@ -595,7 +616,7 @@ export class RoomClient {
   // ==================== BROADCAST CHANNEL (SAME-BROWSER MULTI-TAB) ====================
   handleBroadcastMessage(msg) {
     if (!msg || typeof msg !== 'object' || msg.fromTab === this.tabId) return;
-    if (isOversizedPacket(msg)) return;
+    if (isOversizedInboundPacket(msg)) return;
 
     // Host handling local probes & local guest RPCs
     if (this.role === 'host' && this.room) {
@@ -847,14 +868,19 @@ export class RoomClient {
       }
       room.status = 'playing';
       this.unregisterPublicRoom(room.code, room.hostSecret);
-      room.game = new GameEngine(
-        room,
-        () => this.emitHostRoom(),
-        (eventName, data) => {
-          this.onGameEvent?.(eventName, data);
-          this.sendToAllGuests({ type: 'game_event', event: eventName, data });
-        }
-      );
+      this.suspendRoomEmit = true;
+      try {
+        room.game = new GameEngine(
+          room,
+          () => this.emitHostRoom(),
+          (eventName, data) => {
+            this.onGameEvent?.(eventName, data);
+            this.sendToAllGuests({ type: 'game_event', event: eventName, data });
+          }
+        );
+      } finally {
+        this.suspendRoomEmit = false;
+      }
       this.emitHostRoom();
       return { ok: true };
     }

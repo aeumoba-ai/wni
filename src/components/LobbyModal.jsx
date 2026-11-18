@@ -360,6 +360,12 @@ export default function LobbyModal({
                 placeholder="CONTOH: KNH482"
               />
               {lookingUp && <div className="field-hint">Mencari ruangan {joinCode}...</div>}
+              {!lookingUp && !invitePreview && joinCode.trim().length >= 6 && (
+                <div className="field-hint field-hint-warn">
+                  Ruangan belum ditemukan (host mungkin offline). Periksa kembali kodenya, atau tekan
+                  GABUNG RUANGAN untuk mencoba langsung.
+                </div>
+              )}
             </div>
 
             {(!invitePreview || invitePreview.hasPassword) && (

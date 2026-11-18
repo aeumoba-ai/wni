@@ -427,6 +427,9 @@ export default function App() {
   }, []);
 
   const isPlaying = room?.status === 'playing' && room?.game;
+  // Safety net: a `playing` room without game state used to render an empty page
+  // (only the 3D canvas) until the next network snapshot arrived.
+  const isSyncingGame = room?.status === 'playing' && !room?.game;
   const incomingTrade =
     isPlaying && room.game.pendingTrade && room.game.pendingTrade.toId === guestId
       ? room.game.pendingTrade
@@ -463,6 +466,18 @@ export default function App() {
         busy={busy}
           error={error}
         />
+      )}
+
+      {isSyncingGame && (
+        <div className="lobby-overlay">
+          <div className="kraft-card sync-game-card">
+            <div className="sync-game-spinner" />
+            <div className="sync-game-title">MENYINKRONKAN PAPAN...</div>
+            <div className="sync-game-sub">
+              Menunggu data permainan dari Host. Pastikan koneksi tetap tersambung.
+            </div>
+          </div>
+        </div>
       )}
 
       {room && room.status === 'waiting' && (

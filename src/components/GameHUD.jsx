@@ -165,13 +165,13 @@ export default function GameHUD({
                 </div>
 
                 {delta && (
-                  <div key={delta.ts} className={`money-float ${delta.delta >= 0 ? 'pos' : 'neg'}`}>
+                  <div key={`money-${delta.ts}`} className={`money-float ${delta.delta >= 0 ? 'pos' : 'neg'}`}>
                     {delta.label}
                   </div>
                 )}
 
                 {speech && (
-                  <div key={speech.ts} className="speech-bubble">
+                  <div key={`speech-${speech.ts}`} className="speech-bubble">
                     &ldquo;{speech.text}&rdquo;
                   </div>
                 )}
