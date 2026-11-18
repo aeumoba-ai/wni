@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BOARD_TILES, DEFAULT_BOARD_SEED, TOTAL_TILES, JAIL_TILE_ID, formatShortRupiah } from '../../shared/boardData.js';
 import { getCharacterById } from '../../shared/characters.js';
+import { AmbientLife } from './AmbientLife.js';
 import { soundEngine } from './SoundEngine.js';
 import { buildTileLandmark, buildUpgradeStructure } from './Landmarks3D.js';
 import { DEFAULT_GRAPHICS_SETTINGS, getEffectiveGraphicsSettings } from './GraphicsSettings.js';
@@ -367,6 +368,7 @@ export class Scene3D {
 
     this.currentBoard = BOARD_TILES;
     this.currentBoardSeed = DEFAULT_BOARD_SEED;
+    this.currentAmbientSeed = undefined;
     this.smoothAnimation = false; // Default OFF (animasi standar); toggleable in Settings!
     this.tileMeshes = new Map();
     this.tileGlowMeshes = new Map();
@@ -374,7 +376,6 @@ export class Scene3D {
     this.upgradeGroups = new Map();
     this.landmarkAnims = [];
     this.pawns = new Map();
-    this.cars = [];
     this.flagMesh = null;
     this.dice = [];
     this.diceAnim = null;
@@ -399,6 +400,11 @@ export class Scene3D {
     this.resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(this.onResize) : null;
     this.resizeObserver?.observe(container);
     this.handleResize();
+
+    // Living Indonesian city around the board (vehicles, pedestrians, stalls…).
+    this.ambient = new AmbientLife(this.scene, { compact: this.isCompactViewport });
+    this.ambient.setQuality(this.graphics);
+    if (import.meta.env?.DEV) window.__scene3d = this; // dev-only debugging hook
 
     // Re-render all 40 3D tile textures crisp once the self-hosted theme fonts finish loading!
     if (typeof document !== 'undefined' && document.fonts?.load) {
@@ -688,41 +694,6 @@ export class Scene3D {
       this.scene.add(b);
     });
 
-    // Animated tiny colorful cars cruising along roads & flyover
-    const carColors = ['#ef4444', '#facc15', '#3b82f6', '#22c55e', '#f97316', '#f8fafc'];
-    for (let i = 0; i < 18; i++) {
-      const car = new THREE.Group();
-      const col = carColors[i % carColors.length];
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(1.65, 0.55, 0.92),
-        new THREE.MeshStandardMaterial({ color: col, roughness: 0.4 })
-      );
-      body.position.y = 0.35;
-      const cabin = new THREE.Mesh(
-        new THREE.BoxGeometry(0.88, 0.44, 0.8),
-        new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.3 })
-      );
-      cabin.position.set(-0.08, 0.78, 0);
-      car.add(body, cabin);
-
-      const onFlyover = i < 7;
-      const lane = onFlyover
-        ? { axis: 'x', fixed: -40 + (i % 2 === 0 ? -1.1 : 1.1), y: 8.35, dir: i % 2 === 0 ? 1 : -1 }
-        : i < 13
-          ? { axis: 'x', fixed: -32 + (i % 2 === 0 ? -1.2 : 1.2), y: 0.12, dir: i % 2 === 0 ? 1 : -1 }
-          : { axis: 'z', fixed: (i % 2 === 0 ? -32 : 32) + 1.2, y: 0.12, dir: i % 2 === 0 ? 1 : -1 };
-
-      const startPos = -56 + i * 6.8;
-      if (lane.axis === 'x') {
-        car.position.set(startPos, lane.y, lane.fixed);
-        car.rotation.y = lane.dir > 0 ? 0 : Math.PI;
-      } else {
-        car.position.set(lane.fixed, lane.y, startPos);
-        car.rotation.y = lane.dir > 0 ? -Math.PI / 2 : Math.PI / 2;
-      }
-      this.scene.add(car);
-      this.cars.push({ mesh: car, lane, speed: 5.2 + (i % 4) * 1.9 });
-    }
   }
 
   buildCircularBoard() {
@@ -1153,6 +1124,7 @@ export class Scene3D {
     this.graphicsSettings = next;
     this.graphics = getEffectiveGraphicsSettings(next);
     this.pixelStyle = this.graphics.visualStyle === 'pixel';
+    this.ambient?.setQuality(this.graphics);
     this.applyPixelVisualStyle();
     this.updateRenderResolution();
     this.renderer.shadowMap.enabled = Boolean(this.graphics.shadows);
@@ -1477,6 +1449,12 @@ export class Scene3D {
     // 0. If this game uses a new randomized Indonesian board, rebuild the 40 board tiles & 3D landmarks!
     if (Array.isArray(game.board) && game.board.length > 0 && game.boardSeed !== this.currentBoardSeed) {
       this.populateBoardTiles(game.board, game.boardSeed);
+    }
+    // Every match gets its own rhythm (sepi / cukup ramai / ramai) and its own
+    // mix of vehicles, pedestrians, stalls and street decor.
+    if (game.boardSeed !== undefined && game.boardSeed !== this.currentAmbientSeed) {
+      this.currentAmbientSeed = game.boardSeed;
+      this.ambient?.setSeed(game.boardSeed);
     }
 
     const activeBoard = this.currentBoard;
@@ -1853,17 +1831,7 @@ export class Scene3D {
     const elapsed = this.clock.elapsedTime;
     const now = performance.now();
 
-    for (const c of this.cars) {
-      if (c.lane.axis === 'x') {
-        c.mesh.position.x += c.lane.dir * c.speed * dt;
-        if (c.mesh.position.x > 62) c.mesh.position.x = -62;
-        if (c.mesh.position.x < -62) c.mesh.position.x = 62;
-      } else {
-        c.mesh.position.z += c.lane.dir * c.speed * dt;
-        if (c.mesh.position.z > 62) c.mesh.position.z = -62;
-        if (c.mesh.position.z < -62) c.mesh.position.z = 62;
-      }
-    }
+    if (this.ambient) this.ambient.update(dt);
 
     if (this.flagMesh) {
       this.flagMesh.rotation.y = Math.sin(elapsed * 4.2) * 0.16;
@@ -2155,6 +2123,8 @@ export class Scene3D {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.rafId);
+    this.ambient?.dispose();
+    this.ambient = null;
     this.clearParticles();
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('orientationchange', this.onResize);
