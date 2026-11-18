@@ -27,7 +27,10 @@ const ROAD_HALF_LEN = 62; // asphalt runs to ±68; keep wrap just inside it
 const ROAD_END = 68;
 const LANE_SHIFT = 1.5;
 const PARK_HALF = 21.5;
+const WALK_SIDEWALK_HALF = 36.4; // centre line of the shop-front pavement
+const PAVEMENT_SPAN = [40, 64]; // stretches of pavement that no junction cuts through
 const SIDEWALK_HALF = 36.4; // shop-front pavement, outside the asphalt (28.6…35.4)
+const BOARD_CLEAR = 20.4; // the board itself + its ring of landmarks is sacred
 const FLYOVER_Y = 8.3;
 const FLYOVER_Z = -40;
 
@@ -92,9 +95,11 @@ const SKIN_TONES = ['#f2c39b', '#e0a678', '#c98a5b', '#a86b41'];
 /* ================================================================= class */
 
 export class AmbientLife {
-  constructor(scene, { compact = false } = {}) {
+  constructor(scene, { compact = false, solids = null } = {}) {
     this.scene = scene;
     this.compact = compact;
+    this.citySolids = Array.isArray(solids) ? solids : [];
+    this.blockers = [];
     this.group = new THREE.Group();
     this.group.name = 'ambient-life';
     this.scene.add(this.group);
@@ -115,6 +120,7 @@ export class AmbientLife {
     this.trafficLights = [];
     this.time = 0;
 
+    this.blockers = [];
     this.currentLevel = ACTIVITY_LEVELS.cukup;
     this.levelKey = 'cukup';
     this.moodDwell = between(this.rng, 26, 44);
@@ -191,6 +197,98 @@ export class AmbientLife {
     return mesh;
   }
 
+
+  /* ------------------------------------------------------- PLACEMENT LOGIC */
+  /* Keeps every prop (warung, halte, bangku, tiang, baliho, motor parkir…)
+     clear of the board, the roads, the park footpath, the streetscape that
+     Scene3D built (trees, lamps, monuments, buildings) and of every other
+     prop that was already placed. Guarantees nothing intersects nothing. */
+
+  /** World position of a pavement stroller. */
+  patrolPosition(w, u = w.u) {
+    const clamped = Math.max(w.patrolRange[0], Math.min(w.patrolRange[1], u));
+    const off = w.lateral;
+    if (w.patrolAxis === 'x') {
+      return { x: clamped, z: w.patrolFixed + off, rot: w.dir > 0 ? 0 : Math.PI };
+    }
+    return { x: w.patrolFixed + off, z: clamped, rot: w.dir > 0 ? -Math.PI / 2 : Math.PI / 2 };
+  }
+
+  isOnRoadOrPath(x, z, r) {
+    const ax = Math.abs(x);
+    const az = Math.abs(z);
+    // asphalt ring roads (±32 on both axes, 6.8 wide)
+    if (Math.abs(ax - ROAD_CENTER) < 3.4 + r && az < 78) return true;
+    if (Math.abs(az - ROAD_CENTER) < 3.4 + r && ax < 78) return true;
+    // cream park footpath that rings the board
+    if (Math.abs(ax - PARK_HALF) < 1.3 + r && az < 24) return true;
+    if (Math.abs(az - PARK_HALF) < 1.3 + r && ax < 24) return true;
+    return false;
+  }
+
+  overlapsCitySolid(x, z, r, h, y0 = 0) {
+    for (const s of this.citySolids) {
+      if (!s) continue;
+      const sy0 = s.y0 ?? 0;
+      if (sy0 >= y0 + h || s.h <= y0) continue; // separated vertically
+      if (Math.abs(x - s.x) < s.hw + r && Math.abs(z - s.z) < s.hd + r) return true;
+    }
+    return false;
+  }
+
+  overlapsProp(x, z, r) {
+    for (const b of this.blockers) {
+      const dx = x - b.x;
+      const dz = z - b.z;
+      if (dx * dx + dz * dz < (r + b.r) * (r + b.r)) return true;
+    }
+    return false;
+  }
+
+  canPlace(x, z, r, h) {
+    if (Math.hypot(x, z) - r < BOARD_CLEAR) return false; // never over the board
+    if (this.isOnRoadOrPath(x, z, 0.3)) return false; // the base may not stand on asphalt
+    if (this.overlapsCitySolid(x, z, r, h)) return false;
+    if (this.overlapsProp(x, z, r)) return false;
+    return true;
+  }
+
+  /** Deterministic spiral search: nearest free spot around the wanted anchor. */
+  findSpot(x, z, r, h) {
+    if (this.canPlace(x, z, r, h)) return { x, z };
+    for (let ring = 1; ring <= 16; ring++) {
+      const step = ring * 0.85;
+      const steps = 12 + ring * 4;
+      for (let i = 0; i < steps; i++) {
+        const a = (i / steps) * Math.PI * 2 + ring * 0.7;
+        const cx = x + Math.cos(a) * step;
+        const cz = z + Math.sin(a) * step;
+        if (this.canPlace(cx, cz, r, h)) return { x: cx, z: cz };
+      }
+    }
+    return null;
+  }
+
+  registerProp(x, z, r, h, physR = r, walkable = false) {
+    this.blockers.push({ x, z, r, h, physR, walkable });
+  }
+
+  /** Places a prop group at (or near) the wanted anchor and registers it. */
+  placeProp(group, x, z, r, h, { faceBoard = true, y = 0, physR = null, walkable = false } = {}) {
+    const spot = this.findSpot(x, z, r, h);
+    if (!spot) {
+      group.visible = false;
+      group.userData.unplaced = true;
+      return null;
+    }
+    const physical = physR === null ? Math.min(r, 1.0) : physR;
+    group.position.set(spot.x, y, spot.z);
+    if (faceBoard) group.rotation.y = Math.atan2(-spot.x, -spot.z);
+    this.registerProp(spot.x, spot.z, r, h, physical, walkable);
+    group.userData.solid = { x: spot.x, z: spot.z, r, h, physR: physical, walkable };
+    return spot;
+  }
+
   /* ------------------------------------------------------------ lifecycle */
 
   setQuality(graphics) {
@@ -229,6 +327,15 @@ export class AmbientLife {
     this.idleAnims = [];
     this.lanes = [];
     this.trafficLights = [];
+    this.blockers = [];
+  }
+
+  /** Solids that belong to the base scene (trees, lamps, buildings…) — supplied
+      by Scene3D so the ambient props can be placed without overlapping them. */
+  setCitySolids(list) {
+    this.citySolids = Array.isArray(list) ? list : [];
+    this.blockers = [];
+    this.buildAll(this.seedKey || 'konoha');
   }
 
   buildAll(seedKey) {
@@ -239,9 +346,9 @@ export class AmbientLife {
     this.buildTrafficLights();
     this.buildStreetFurniture();
     this.buildBillboards();
+    this.buildStalls();
     this.buildLanesAndVehicles();
     this.buildWalkers();
-    this.buildStalls();
 
     // Base mood is randomised for every match, then it keeps mutating over time.
     this.levelKey = this.rollLevel();
@@ -316,12 +423,18 @@ export class AmbientLife {
 
     // Paved sidewalks along the four roads (cream, like the park footpath).
     const walkMat = this.mat('#efeada', { roughness: 0.9 });
+    const PAVE_FROM = ROAD_CENTER + 3.4; // asphalt edge
+    const PAVE_TO = 68;
+    const segLen = PAVE_TO - PAVE_FROM; // 32.6
     for (const sign of [-1, 1]) {
-      this.box(g, '', 136, 0.14, 2.1, 0, 0.07, sign * SIDEWALK_HALF, { material: walkMat, noShadow: true });
-      this.box(g, '', 2.1, 0.14, 136, sign * SIDEWALK_HALF, 0.07, 0, { material: walkMat, noShadow: true });
-      // kerb stone between asphalt and pavement
-      this.box(g, '#d8d2c2', 136, 0.18, 0.3, 0, 0.09, sign * (SIDEWALK_HALF - 1.05), { noShadow: true });
-      this.box(g, '#d8d2c2', 0.3, 0.18, 136, sign * (SIDEWALK_HALF - 1.05), 0.09, 0, { noShadow: true });
+      for (const dirSeg of [-1, 1]) {
+        const cSeg = dirSeg * (PAVE_FROM + segLen / 2);
+        this.box(g, '', segLen, 0.14, 2.1, cSeg, 0.07, sign * SIDEWALK_HALF, { material: walkMat, noShadow: true });
+        this.box(g, '', 2.1, 0.14, segLen, sign * SIDEWALK_HALF, 0.07, cSeg, { material: walkMat, noShadow: true });
+        // kerb stone between asphalt and pavement
+        this.box(g, '#d8d2c2', segLen, 0.18, 0.3, cSeg, 0.09, sign * (SIDEWALK_HALF - 1.05), { noShadow: true });
+        this.box(g, '#d8d2c2', 0.3, 0.18, segLen, sign * (SIDEWALK_HALF - 1.05), 0.09, cSeg, { noShadow: true });
+      }
     }
 
     // Dashed centre lines (instanced — one draw call for the whole map).
@@ -375,10 +488,11 @@ export class AmbientLife {
 
     // Simple road name plates on the corners.
     for (const [sx, sz] of [[1, 1], [-1, -1]]) {
-      const px = sx * 41;
-      const pz = sz * 37.2;
-      this.cylinder(g, '#94a3b8', 0.07, 3.2, px, 1.6, pz);
-      this.box(g, '#1e40af', 2.4, 0.55, 0.08, px, 3.1, pz);
+      const sign = new THREE.Group();
+      this.cylinder(sign, '#94a3b8', 0.07, 3.2, 0, 1.6, 0);
+      this.box(sign, '#1e40af', 2.4, 0.55, 0.08, 0, 3.1, 0);
+      g.add(sign);
+      this.placeProp(sign, sx * 41, sz * 37.2, 1.3, 3.4, { physR: 1.1 });
     }
   }
 
@@ -392,7 +506,9 @@ export class AmbientLife {
     ];
     for (const [sx, sz] of corners) {
       const group = new THREE.Group();
-      group.position.set(sx * (ROAD_CENTER + 4.3), 0, sz * (ROAD_CENTER + 4.3));
+      g.add(group);
+      const spot = this.placeProp(group, sx * (ROAD_CENTER + 4.4), sz * (ROAD_CENTER + 4.4), 0.6, 4.8, { faceBoard: false, physR: 0.3 });
+      if (spot) group.rotation.y = Math.atan2(-spot.x, -spot.z);
       this.cylinder(group, '#334155', 0.13, 4.2, 0, 2.1, 0);
       this.box(group, '#1f2937', 0.42, 1.25, 0.42, 0, 4.4, 0);
 
@@ -416,7 +532,6 @@ export class AmbientLife {
         group.add(bulb);
         lamps[key] = mat;
       }
-      g.add(group);
       this.trafficLights.push({ group, lamps, corner: [sx, sz] });
     }
   }
@@ -430,21 +545,29 @@ export class AmbientLife {
     // Utility poles + overhead cables along the ring roads (very Indonesian).
     const poleMat = this.mat('#8a8f98', { roughness: 0.8 });
     const wireMat = this.mat('#2f3238', { roughness: 0.9 });
+    const poleTops = [];
     for (let i = -2; i <= 2; i++) {
       for (const sz of [-1, 1]) {
-        const x = i * 24;
-        const z = sz * (SIDEWALK_HALF + 0.75);
-        this.cylinder(g, '', 0.14, 6.4, x, 3.2, z, { material: poleMat });
-        this.box(g, '#5b6068', 1.5, 0.12, 0.12, x, 5.7, z);
-        this.box(g, '#5b6068', 1.1, 0.12, 0.12, x, 5.0, z);
-        if (i < 2) {
-          for (const dy of [0, -0.34]) {
-            const wire = new THREE.Mesh(this.geo.box, wireMat);
-            wire.scale.set(24, 0.045, 0.045);
-            wire.position.set(x + 12, 5.66 + dy, z);
-            g.add(wire);
-          }
-        }
+        const pole = new THREE.Group();
+        this.cylinder(pole, '', 0.14, 6.4, 0, 3.2, 0, { material: poleMat });
+        this.box(pole, '#5b6068', 1.5, 0.12, 0.12, 0, 5.7, 0);
+        this.box(pole, '#5b6068', 1.1, 0.12, 0.12, 0, 5.0, 0);
+        this.box(pole, '#94a3b8', 0.26, 0.26, 0.26, 0, 6.5, 0);
+        g.add(pole);
+        const spot = this.placeProp(pole, i * 24, sz * (SIDEWALK_HALF + 0.75), 0.75, 6.6, { faceBoard: false, physR: 0.2 });
+        if (spot && i < 2) poleTops.push({ ...spot, sz });
+      }
+    }
+    // Overhead cables hang between neighbouring poles (never through a building).
+    for (const top of poleTops) {
+      const next = poleTops.find((o) => o !== top && o.sz === top.sz && Math.abs(o.x - top.x - 24) < 1.5);
+      if (!next) continue;
+      const len = next.x - top.x;
+      for (const dy of [0, -0.34]) {
+        const wire = new THREE.Mesh(this.geo.box, wireMat);
+        wire.scale.set(len, 0.045, 0.045);
+        wire.position.set(top.x + len / 2, 5.66 + dy, (top.z + next.z) / 2);
+        g.add(wire);
       }
     }
 
@@ -462,46 +585,51 @@ export class AmbientLife {
     ];
     for (const [bx, bz, ry] of benchPlaces) {
       const bench = new THREE.Group();
-      bench.position.set(bx, 0, bz);
-      bench.rotation.y = ry;
       this.box(bench, '', 2.1, 0.12, 0.6, 0, 0.52, 0, { material: benchMat });
       this.box(bench, '', 2.1, 0.5, 0.12, 0, 0.78, -0.28, { material: benchMat });
       this.box(bench, '#6b7280', 0.12, 0.5, 0.12, -0.85, 0.26, 0.18);
       this.box(bench, '#6b7280', 0.12, 0.5, 0.12, 0.85, 0.26, 0.18);
       g.add(bench);
+      const spot = this.placeProp(bench, bx, bz, 1.15, 1.0, { faceBoard: false, physR: 1.0 });
+      if (spot) bench.rotation.y = ry;
     }
 
-    for (const [bx, bz] of [[-24.5, 12], [24.5, 12], [-24.5, -12], [24.5, -12]]) {
-      this.cylinder(g, '#166534', 0.34, 0.86, bx, 0.43, bz);
-      this.cylinder(g, '#14532d', 0.38, 0.1, bx, 0.9, bz);
+    for (const [bx, bz] of [[-25.2, 12], [25.2, 12], [-25.2, -12], [25.2, -12]]) {
+      const bin = new THREE.Group();
+      this.cylinder(bin, '#166534', 0.34, 0.86, 0, 0.43, 0);
+      this.cylinder(bin, '#14532d', 0.38, 0.1, 0, 0.9, 0);
+      g.add(bin);
+      this.placeProp(bin, bx, bz, 0.5, 0.95, { faceBoard: false, physR: 0.36 });
     }
 
     // Planter boxes with colourful flowers around the monument side.
     const flowerColors = ['#f472b6', '#fbbf24', '#f87171', '#c084fc', '#facc15'];
     for (let i = 0; i < 10; i++) {
       const angle = (i / 10) * Math.PI * 2;
-      const px = Math.cos(angle) * 24.2;
-      const pz = Math.sin(angle) * 24.2;
-      this.box(g, '#b45309', 1.8, 0.4, 0.8, px, 0.2, pz, { rotY: -angle });
+      const planter = new THREE.Group();
+      this.box(planter, '#b45309', 1.8, 0.4, 0.8, 0, 0.2, 0);
       // low green hedge, then the flowers on top
       for (let f = 0; f < 3; f++) {
         const ox = (f - 1) * 0.5;
-        this.sphere(g, '#166534', 0.17, px + ox, 0.42, pz, { noShadow: true, sy: 0.7 });
-        this.sphere(g, pick(rand, flowerColors), 0.1, px + ox, 0.56, pz, { noShadow: true });
+        this.sphere(planter, '#166534', 0.17, ox, 0.42, 0, { noShadow: true, sy: 0.7 });
+        this.sphere(planter, pick(rand, flowerColors), 0.1, ox, 0.56, 0, { noShadow: true });
       }
+      g.add(planter);
+      const spot = this.placeProp(planter, Math.cos(angle) * 24.2, Math.sin(angle) * 24.2, 1.0, 0.65, { faceBoard: false, physR: 0.9 });
+      if (spot) planter.rotation.y = -angle;
     }
 
     // Umbul-umbul / flags near the palace, waving with the idle animation list.
     for (let i = 0; i < 6; i++) {
-      const fx = -10 + i * 4;
-      const fz = -23.2;
-      this.cylinder(g, '#cbd5e1', 0.05, 3.4, fx, 1.7, fz, { noShadow: true });
+      const post = new THREE.Group();
+      this.cylinder(post, '#cbd5e1', 0.05, 3.4, 0, 1.7, 0, { noShadow: true });
       const flag = new THREE.Mesh(this.geo.box, this.mat(i % 2 ? '#f97316' : '#dc2626', { roughness: 0.6 }));
       flag.scale.set(1.1, 0.7, 0.06);
-      flag.position.set(fx + 0.55, 3.0, fz);
-      flag.userData.localMaterial = false;
-      g.add(flag);
-      this.addAnim('flag', flag, { phase: i * 0.7, speed: 2.4 + (i % 3) * 0.4 });
+      flag.position.set(0.55, 3.0, 0);
+      g.add(post);
+      post.add(flag);
+      const spot = this.placeProp(post, -10 + i * 4, -23.2, 0.7, 3.5, { faceBoard: false, physR: 0.45 });
+      if (spot) this.addAnim('flag', flag, { phase: i * 0.7, speed: 2.4 + (i % 3) * 0.4 });
     }
 
     // Parked motorcycles cluster (dekat warung) + a parked angkot at the halte.
@@ -513,9 +641,9 @@ export class AmbientLife {
     ];
     for (const [px, pz, ry] of parkingSpots) {
       const bike = this.buildMotorcycle(false, true);
-      bike.position.set(px, 0, pz);
-      bike.rotation.y = ry + Math.PI / 2;
       g.add(bike);
+      const spot = this.placeProp(bike, px, pz, 0.85, 1.0, { faceBoard: false, physR: 0.7 });
+      if (spot) bike.rotation.y = ry + Math.PI / 2;
     }
   }
 
@@ -536,8 +664,6 @@ export class AmbientLife {
       const [bx, bz, ry] = spots[i];
       const ad = ads[Math.floor(rand() * ads.length) % ads.length];
       const group = new THREE.Group();
-      group.position.set(bx, 0, bz);
-      group.rotation.y = ry;
       this.box(group, '#475569', 0.28, 7.2, 0.28, -2.4, 3.6, 0);
       this.box(group, '#475569', 0.28, 7.2, 0.28, 2.4, 3.6, 0);
       this.box(group, '#f8fafc', 6.0, 3.1, 0.22, 0, 6.0, 0);
@@ -550,6 +676,8 @@ export class AmbientLife {
       board.position.set(0, 6.0, 0.15);
       group.add(board);
       this.group.add(group);
+      const spot = this.placeProp(group, bx, bz, 3.1, 7.6, { faceBoard: false, physR: 3.0, walkable: true });
+      if (spot) group.rotation.y = ry;
     }
   }
 
@@ -771,13 +899,31 @@ export class AmbientLife {
     return g;
   }
 
+  laneSlotFree(lane, pos, self, extra = 2.2) {
+    return !lane.vehicles.some((other) => {
+      if (other === self || !other.active) return false;
+      return Math.abs(other.pos - pos) < (other.length + self.length) / 2 + extra;
+    });
+  }
+
   spawnVehicle(vehicle) {
     const lane = vehicle.lane;
-    // Enter from the edge of the map in the direction of travel.
-    vehicle.pos = lane.dir > 0 ? -ROAD_END - between(this.rng, 0, 10) : ROAD_END + between(this.rng, 0, 10);
+    const entry = lane.dir > 0 ? -ROAD_END - between(this.rng, 0, 8) : ROAD_END + between(this.rng, 0, 8);
+    // Pick the first entry slot that is not already taken by another vehicle.
+    let chosen = entry;
+    for (let attempt = 0; attempt < 14; attempt++) {
+      const candidate = lane.dir > 0 ? entry - attempt * 4.5 : entry + attempt * 4.5;
+      if (this.laneSlotFree(lane, candidate, vehicle, 2.4)) {
+        chosen = candidate;
+        break;
+      }
+    }
+    vehicle.pos = chosen;
     vehicle.speed = vehicle.baseSpeed;
     vehicle.active = true;
     vehicle.retiring = false;
+    vehicle.waitingToWrap = false;
+    vehicle.gap = Infinity;
     vehicle.group.visible = true;
     this.placeVehicle(vehicle);
   }
@@ -794,6 +940,27 @@ export class AmbientLife {
   }
 
   /* ============================================================== WALKERS */
+
+  /** Ground-level occupancy test for pedestrians: other props, trees, lamps,
+      monuments, buildings and fellow walkers. */
+  walkBlocked(x, z, self, radius) {
+    for (const b of this.blockers) {
+      if (b.walkable) continue; // open shelters: people walk underneath
+      if (b.h !== undefined && b.h < 0.35) continue;
+      const dx = x - b.x;
+      const dz = z - b.z;
+      const min = radius + (b.physR ?? b.r);
+      if (dx * dx + dz * dz < min * min) return true;
+    }
+    for (const other of this.walkers) {
+      if (other === self || !other.group.visible) continue;
+      const dx = x - other.group.position.x;
+      const dz = z - other.group.position.z;
+      const min = radius + 0.42;
+      if (dx * dx + dz * dz < min * min) return true;
+    }
+    return false;
+  }
 
   buildWalkers() {
     const rand = this.rng;
@@ -817,51 +984,102 @@ export class AmbientLife {
       'ibu',
       'anak',
     ];
+    // Who strolls the park footpath and who walks along the shop fronts.
+    const parkSlots = [];
+    const pavementSlots = [];
     for (let i = 0; i < maxWalkers; i++) {
       const role = roles[i % roles.length];
-      const isPark = i % 3 !== 0;
-      const half = isPark ? PARK_HALF : SIDEWALK_HALF;
+      if (role === 'fotografer' || i % 3 !== 0) parkSlots.push(i);
+      else pavementSlots.push(i);
+    }
+    let parkIndex = 0;
+    let pavementIndex = 0;
+
+    for (let i = 0; i < maxWalkers; i++) {
+      const role = roles[i % roles.length];
+      const isPark = role === 'fotografer' || i % 3 !== 0;
+      const half = isPark ? PARK_HALF : WALK_SIDEWALK_HALF;
+      const lateralLimit = isPark ? 0.75 : 0.62;
+      const lateral = isPark ? between(rand, -0.75, 0.75) : between(rand, -0.5, 0.5);
+
+      // Park walkers roam the promenade ring; pavement walkers patrol one shop front.
+      const slot = isPark ? parkIndex++ : pavementIndex++;
+      const slotCount = isPark ? parkSlots.length : pavementSlots.length;
+      const perimeter = 8 * half;
+      const segIndex = slot % 8;
+      const patrolAxis = segIndex % 2 === 0 ? 'x' : 'z';
+      const patrolSign = segIndex < 4 ? 1 : -1;
+      const patrolFixed = patrolSign * WALK_SIDEWALK_HALF;
+      const patrolEnd = (segIndex % 4) < 2 ? 1 : -1;
+      const patrolRange = [
+        patrolEnd > 0 ? PAVEMENT_SPAN[0] : -PAVEMENT_SPAN[1],
+        patrolEnd > 0 ? PAVEMENT_SPAN[1] : -PAVEMENT_SPAN[0],
+      ];
+
+      // Spawn clear of every prop: nudge along the route until the spot is free.
+      let startT = (slot / Math.max(1, slotCount)) * perimeter + between(rand, -0.6, 0.6);
+      let startU = between(rand, patrolRange[0] + 1.5, patrolRange[1] - 1.5);
+      const radius = 0.3;
+      for (let attempt = 0; attempt < 26; attempt++) {
+        const probe = isPark ? ringPosition(half, startT, lateral) : this.patrolPosition({
+          patrolAxis,
+          patrolFixed,
+          lateral,
+          dir: 1,
+          patrolRange,
+        }, startU);
+        const clash = this.blockers.some((b) => !b.walkable && (b.physR ?? b.r) > 0.3
+          && Math.hypot(probe.x - b.x, probe.z - b.z) < (b.physR ?? b.r) + radius + 0.15);
+        if (!clash) break;
+        if (isPark) startT += 1.8;
+        else startU = patrolRange[0] + ((startU - patrolRange[0] + 2.2) % (patrolRange[1] - patrolRange[0]));
+      }
+
       const { group, legs, scale: personScale } = this.buildPerson(role, rand);
       group.visible = false;
       group.scale.setScalar(0.001);
       this.group.add(group);
 
+      const base = {
+        group,
+        legs,
+        role,
+        baseScale: personScale,
+        half,
+        lateral,
+        lateralLimit,
+        scale: 0.001,
+        targetScale: 0,
+        bobPhase: rand() * Math.PI * 2,
+        wait: 0,
+        blockedFor: 0,
+        sideStep: rand() > 0.5 ? 0.55 : -0.55,
+        dir: rand() > 0.5 ? 1 : -1,
+      };
+
       if (role === 'fotografer') {
-        // Tourist posing near the monuments, walking slowly back & forth.
         this.walkers.push({
-          group,
-          legs,
-          role,
-          baseScale: personScale,
+          ...base,
           mode: 'idle',
-          t: between(rand, 0, Math.PI * 2),
+          patrol: false,
+          t: startT,
           speed: 0.35,
-          half,
-          lateral: between(rand, -1.0, 1.0),
-          dir: rand() > 0.5 ? 1 : -1,
           pause: between(rand, 0, 3),
-          scale: 0.001,
-          targetScale: 0,
-          bobPhase: rand() * Math.PI * 2,
         });
         continue;
       }
 
       this.walkers.push({
-        group,
-        legs,
-        role,
-        baseScale: personScale,
+        ...base,
         mode: 'path',
-        t: between(rand, 0, 4) * half,
+        patrol: !isPark,
+        t: startT,
+        u: startU,
+        patrolAxis,
+        patrolFixed,
+        patrolRange,
         speed: between(rand, 0.9, 1.7) * (role === 'anak' ? 1.2 : 1),
-        half,
-        lateral: between(rand, -0.75, 0.75),
-        dir: rand() > 0.5 ? 1 : -1,
         pause: between(rand, 0, 2.5),
-        scale: 0.001,
-        targetScale: 0,
-        bobPhase: rand() * Math.PI * 2,
       });
     }
   }
@@ -1007,18 +1225,30 @@ export class AmbientLife {
       [9, 24.6],
       [-9, 24.6],
       [26.6, 21.5],
-      [35.2, -20],
+      [37.2, -20],
     ];
     for (let i = 0; i < maxStalls; i++) {
       const kind = kinds[i % kinds.length];
       const [ax, az] = anchors[i % anchors.length];
       const group = this.buildStall(kind, rand);
-      group.position.set(ax, 0, az);
-      // Face the board
-      group.rotation.y = Math.atan2(-ax, -az);
       group.visible = false;
       group.scale.setScalar(0.001);
       this.group.add(group);
+      const STALL_FOOTPRINT = {
+        warung: 1.9,
+        bakso: 1.1,
+        gorengan: 1.3,
+        es: 1.5,
+        balon: 1.0,
+        sate: 1.7,
+        bensin: 1.1,
+        halte: 2.3,
+      };
+      const foot = STALL_FOOTPRINT[kind] ?? 1.3;
+      this.placeProp(group, ax, az, foot, 2.8, {
+        physR: Math.max(0.6, foot - 0.25),
+        walkable: kind === 'halte', // pedestrians pass under the shelter roof
+      });
       this.stalls.push({
         group,
         kind,
@@ -1093,7 +1323,7 @@ export class AmbientLife {
       case 'sate': {
         this.box(g, '#7c2d12', 2.0, 0.6, 0.8, 0, 0.6, 0);
         this.box(g, '#1f2937', 1.4, 0.16, 0.5, 0, 1.0, 0);
-          const ember = this.box(g, '#f97316', 1.2, 0.08, 0.4, 0, 1.02, 0, { emissive: '#f97316', emissiveIntensity: 0.8 });
+        const ember = this.box(g, '#f97316', 1.2, 0.08, 0.4, 0, 1.02, 0, { emissive: '#f97316', emissiveIntensity: 0.8 });
         this.addAnim('flicker', ember, { speed: 6 });
         for (let i = 0; i < 3; i++) {
           const puff = this.sphere(g, '#e2e8f0', 0.18, 0, 1.25 + i * 0.25, 0, { noShadow: true, transparent: true, opacity: 0.45 });
@@ -1135,28 +1365,54 @@ export class AmbientLife {
     const speedScale = this.currentLevel.speed;
     this.updateTrafficLights();
 
+    // vehicles that were queued off-map may re-enter now
+    for (const v of this.vehicles) {
+      if (!v.waitingToWrap || !v.active) continue;
+      const lane = v.lane;
+      const target = v.pos > 0 ? -ROAD_END : ROAD_END;
+      if (this.laneSlotFree(lane, target, v, 1.5)) {
+        v.pos = target;
+        v.group.visible = true;
+        v.waitingToWrap = false;
+      }
+    }
+
     // ---- vehicles
     for (const lane of this.lanes) {
       const list = lane.vehicles.filter((v) => v.active);
       for (const v of list) {
         let target = v.baseSpeed * speedScale;
 
-        // Red light: brake smoothly before the intersection stop line.
+        // Red light: brake smoothly and never cross the stop line.
+        let stopRoom = Infinity;
         if (lane.lightAxis && this.lights[lane.lightAxis] !== 'green') {
           const dist = this.distanceToNextStop(v.pos, lane.dir);
-          if (dist > 0 && dist < 6) target *= Math.max(0, (dist - 0.6) / 6) * 0.95;
+          // Stop with the front bumper behind the line, so no car ever noses
+          // into the junction while the cross traffic has green.
+          const frontClear = v.length / 2 + 0.5;
+          if (dist > 0) {
+            stopRoom = Math.max(0, dist - frontClear);
+            if (dist < frontClear + 7) target *= Math.max(0, (dist - frontClear) / 7) * 0.9;
+          }
         }
 
         // Keep a safe distance from the vehicle ahead (no overlapping).
         let gap = Infinity;
+        let aheadLength = v.length;
         for (const other of list) {
           if (other === v) continue;
           const loop = ROAD_END * 2;
           const rel = (((other.pos - v.pos) * lane.dir) % loop + loop) % loop;
-          if (rel > 0.3 && rel < gap) gap = rel;
+          if (rel > 0.3 && rel < gap) {
+            gap = rel;
+            aheadLength = other.length;
+          }
         }
-        const safe = v.length + 1.6;
-        if (gap < safe) target *= Math.max(0.02, gap / safe);
+        const halfSum = (v.length + aheadLength) / 2;
+        const safe = halfSum + 2.2;
+        v.gap = gap;
+        v.halfSum = halfSum;
+        if (gap < safe) target *= Math.max(0.02, (gap - halfSum - 0.6) / (safe - halfSum));
 
         // Angkot & becak pause now and then, like real street life.
         if (v.stopTimer > 0) {
@@ -1166,7 +1422,15 @@ export class AmbientLife {
           v.stopTimer = 1.6;
         }
 
-        v.pos += lane.dir * target * dt;
+        let step = lane.dir * target * dt;
+        // Never move closer than a car length to the vehicle ahead…
+        if (Number.isFinite(gap)) {
+          const room = Math.max(0, gap - (v.halfSum || v.length) - 0.6);
+          if (Math.abs(step) > room) step = Math.sign(step) * room;
+        }
+        // …and never roll past a red light into the junction.
+        if (Number.isFinite(stopRoom) && Math.abs(step) > stopRoom) step = Math.sign(step) * stopRoom;
+        v.pos += step;
 
         // Wrap at the map edge; retired vehicles simply leave for good.
         if (v.pos > ROAD_END || v.pos < -ROAD_END) {
@@ -1176,8 +1440,15 @@ export class AmbientLife {
             v.group.visible = false;
             continue;
           }
-          if (v.pos > ROAD_END) v.pos = -ROAD_END;
-          else v.pos = ROAD_END;
+          const target = v.pos > ROAD_END ? -ROAD_END : ROAD_END;
+          // Only re-enter when the other end of the lane is clear.
+          if (this.laneSlotFree(lane, target, v, 1.5)) {
+            v.pos = target;
+          } else {
+            v.pos = v.pos > ROAD_END ? ROAD_END + 0.5 : -ROAD_END - 0.5;
+            v.group.visible = false;
+            v.waitingToWrap = true;
+          }
         }
 
         this.placeVehicle(v);
@@ -1199,14 +1470,64 @@ export class AmbientLife {
       }
       if (!w.group.visible) continue;
 
-      const walking = w.pause <= 0;
-      if (w.pause > 0) {
-        w.pause -= dt;
-      } else {
-        w.t += w.dir * w.speed * speedScale * dt;
+      const walking = w.pause <= 0 && w.wait <= 0;
+      if (w.pause > 0) w.pause -= dt;
+      if (w.wait > 0) w.wait -= dt;
+
+      if (walking) {
+        const walkerRadius = 0.3 * (w.baseScale || 1);
+        if (w.patrol) {
+          const nextU = w.u + w.dir * w.speed * speedScale * dt;
+          const probe = this.patrolPosition(w, nextU);
+          if (!this.walkBlocked(probe.x, probe.z, w, walkerRadius)) {
+            w.u = nextU;
+            w.blockedFor = 0;
+          } else if (!this.walkBlocked(
+            this.patrolPosition({ ...w, lateral: w.lateral + (w.sideStep || 0.5) * 0.6 }).x,
+            this.patrolPosition({ ...w, lateral: w.lateral + (w.sideStep || 0.5) * 0.6 }).z,
+            w,
+            walkerRadius,
+          )) {
+            // slip past on the outer/inner edge of the pavement
+            w.lateral = Math.max(-w.lateralLimit, Math.min(w.lateralLimit, w.lateral + (w.sideStep || 0.5) * 0.35));
+            w.blockedFor = 0;
+          } else {
+            w.blockedFor = (w.blockedFor || 0) + dt;
+            if (w.blockedFor > 1.1) {
+              w.dir = -w.dir; // turn around — no dead ends
+              w.blockedFor = 0;
+              w.sideStep = -(w.sideStep || 0.5);
+            }
+          }
+          if (w.u <= w.patrolRange[0]) w.dir = 1;
+          if (w.u >= w.patrolRange[1]) w.dir = -1;
+        } else {
+          const stepDist = w.dir * w.speed * speedScale * dt;
+          const lookAhead = Math.sign(stepDist) * (0.6 + Math.abs(stepDist));
+          const ahead = ringPosition(w.half, w.t + lookAhead, w.lateral);
+          if (!this.walkBlocked(ahead.x, ahead.z, w, walkerRadius)) {
+            w.t += stepDist;
+            w.blockedFor = 0;
+          } else {
+            const limit = w.lateralLimit ?? 0.75;
+            const wantLateral = Math.max(-limit, Math.min(limit, w.lateral + (w.sideStep || 0.55) * 0.5));
+            const shifted = ringPosition(w.half, w.t, wantLateral);
+            if (wantLateral !== w.lateral && !this.walkBlocked(shifted.x, shifted.z, w, walkerRadius)) {
+              w.lateral = wantLateral;
+              w.blockedFor = 0;
+            } else {
+              w.blockedFor = (w.blockedFor || 0) + dt;
+              if (w.blockedFor > 1.1) {
+                w.dir = -w.dir; // walk the other way instead of pushing through
+                w.blockedFor = 0;
+                w.sideStep = -(w.sideStep || 0.55);
+              }
+            }
+          }
+        }
       }
 
-      const pos = ringPosition(w.half, w.t, w.lateral);
+      const pos = w.patrol ? this.patrolPosition(w) : ringPosition(w.half, w.t, w.lateral);
       const groundY = Math.abs(pos.x) > PARK_HALF + 1 || Math.abs(pos.z) > PARK_HALF + 1 ? 0.1 : 0.09;
       const bobY = walking ? Math.abs(Math.sin(bob * 7 + w.bobPhase)) * 0.045 : 0;
       w.group.position.set(pos.x, groundY + bobY, pos.z);
@@ -1272,9 +1593,15 @@ export class AmbientLife {
     }
   }
 
+  /** Distance from the vehicle centre to the next stop line. Lines sit just
+      outside the junction box (asphalt is ROAD_CENTER ± 3.4), never in it. */
   distanceToNextStop(pos, dir) {
     let best = Infinity;
-    for (const stop of [-ROAD_CENTER, ROAD_CENTER]) {
+    // Each direction has its own pair of lines on the approach side of a junction.
+    const stops = dir > 0
+      ? [-(ROAD_CENTER + 3.4), ROAD_CENTER - 3.4]
+      : [ROAD_CENTER + 3.4, -(ROAD_CENTER - 3.4)];
+    for (const stop of stops) {
       const d = (stop - pos) * dir;
       if (d > -1 && d < best) best = d;
     }
@@ -1284,10 +1611,14 @@ export class AmbientLife {
   updateTrafficLights() {
     const cycle = this.time % 24;
     let phase;
-    if (cycle < 10) phase = { x: 'green', z: 'red' };
-    else if (cycle < 12) phase = { x: 'yellow', z: 'red' };
-    else if (cycle < 22) phase = { x: 'red', z: 'green' };
-    else phase = { x: 'red', z: 'yellow' };
+    // 9 s green + 2 s yellow + 1 s all-red per axis: slow becak/bajaj always
+    // clear the junction before the cross traffic gets its green.
+    if (cycle < 9) phase = { x: 'green', z: 'red' };
+    else if (cycle < 11) phase = { x: 'yellow', z: 'red' };
+    else if (cycle < 12) phase = { x: 'red', z: 'red' };
+    else if (cycle < 21) phase = { x: 'red', z: 'green' };
+    else if (cycle < 23) phase = { x: 'red', z: 'yellow' };
+    else phase = { x: 'red', z: 'red' };
     this.lights = phase;
 
     const setLamp = (mat, on, color) => {

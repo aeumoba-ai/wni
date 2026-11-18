@@ -402,9 +402,12 @@ export class Scene3D {
     this.handleResize();
 
     // Living Indonesian city around the board (vehicles, pedestrians, stalls…).
-    this.ambient = new AmbientLife(this.scene, { compact: this.isCompactViewport });
+    this.ambient = new AmbientLife(this.scene, { compact: this.isCompactViewport, solids: this.citySolids });
     this.ambient.setQuality(this.graphics);
-    if (import.meta.env?.DEV) window.__scene3d = this; // dev-only debugging hook
+    if (import.meta.env?.DEV) {
+      window.__scene3d = this; // dev-only debugging hook
+      window.__THREE = THREE;
+    }
 
     // Re-render all 40 3D tile textures crisp once the self-hosted theme fonts finish loading!
     if (typeof document !== 'undefined' && document.fonts?.load) {
@@ -467,6 +470,12 @@ export class Scene3D {
   }
 
   buildCityEnvironment() {
+    // Everything built here is registered as a solid so the ambient city props
+    // (warung, halte, bangku, tiang, baliho…) can never be placed on top of it.
+    const solids = [];
+    this.citySolids = solids;
+    const solid = (x, z, hw, hd, h, y0 = 0) => solids.push({ x, z, hw, hd, h, y0 });
+
     // Lush vibrant green lawn (matching gameplay-1 & gameplay-2!)
     const grass = new THREE.Mesh(
       new THREE.PlaneGeometry(190, 190),
@@ -527,6 +536,7 @@ export class Scene3D {
       pillar.position.set(x, 3.9, -40);
       pillar.castShadow = true;
       this.scene.add(pillar);
+      solid(x, -40, 0.75, 1.0, 7.8);
     }
 
     // Black street lamps with round cream globes around the park walkway (gameplay-2.jpg!)
@@ -547,6 +557,7 @@ export class Scene3D {
         const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 8), bulbMat);
         bulb.position.set(lx, 3.5, lz);
         this.scene.add(bulb);
+        solid(lx, lz, 0.24, 0.24, 3.8);
       }
     }
 
@@ -579,6 +590,11 @@ export class Scene3D {
       }
       g.position.set(x, 0, z);
       this.scene.add(g);
+      // solid trunk up to the crown…
+      solid(x, z, 0.42 * scale, 0.42 * scale, 1.9 * scale);
+      // …and the leafy crown above head height (only tall things must avoid it)
+      const crownR = (type === 'pine' ? 1.5 : 1.65) * scale;
+      solid(x, z, crownR, crownR, (type === 'pine' ? 5.5 : 4.6) * scale, 1.15 * scale);
     };
 
     const treeCoords = [
@@ -616,6 +632,8 @@ export class Scene3D {
     monas.add(monasFlame);
     monas.position.set(-22, 0, -26.5);
     this.scene.add(monas);
+    solid(-22, -26.5, 3.4, 3.4, 2.3);
+    solid(-22, -26.5, 1.5, 1.5, 21.6, 2.3);
 
     // 2. ISTANA NEGARA + Merah-Putih Flag (top-center)
     const istana = new THREE.Group();
@@ -645,6 +663,7 @@ export class Scene3D {
     istana.add(flagGroup);
     istana.position.set(0, 0, -26.8);
     this.scene.add(istana);
+    solid(0, -26.8, 6.9, 3.0, 4.7);
 
     // 3. MASJID ISTIQLAL (top-right green dome)
     const mosque = new THREE.Group();
@@ -661,6 +680,8 @@ export class Scene3D {
     mosque.add(dome);
     mosque.position.set(21.5, 0, -26.5);
     this.scene.add(mosque);
+    solid(21.5, -26.5, 4.25, 3.3, 4.2);
+    solid(21.5, -26.5, 2.8, 2.8, 6.6, 3.8);
 
     // Dense crisp low-poly Indonesian city buildings surrounding the park
     const bColors = ['#ece9e1', '#e0e7ec', '#f2e8da', '#e2eae2', '#eae4eb'];
@@ -688,10 +709,13 @@ export class Scene3D {
         sideMat,
         sideMat,
       ]);
-      b.position.set(bx + ((i % 3) - 1) * 0.7, bh / 2, bz + (((i + 1) % 3) - 1) * 0.7);
+      const bpx = bx + ((i % 3) - 1) * 0.7;
+      const bpz = bz + (((i + 1) % 3) - 1) * 0.7;
+      b.position.set(bpx, bh / 2, bpz);
       b.castShadow = true;
       b.receiveShadow = true;
       this.scene.add(b);
+      solid(bpx, bpz, bw / 2, bd / 2, bh);
     });
 
   }
@@ -840,13 +864,57 @@ export class Scene3D {
     }
   }
 
+  /**
+   * Fits a landmark / building inside its own tile wedge.
+   * The prop is centred on its tile, then shrunk until its footprint stays
+   * inside the 9° sector, so two neighbouring props can never intersect.
+   */
+  fitTileProp(container, content, tileId) {
+    while (container.children.length > 0) container.remove(container.children[0]);
+    content.position.set(0, 0, 0);
+    content.rotation.set(0, 0, 0);
+    content.scale.setScalar(1);
+
+    const inner = new THREE.Group();
+    inner.add(content);
+    inner.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(inner);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const cx = (box.min.x + box.max.x) / 2;
+    const cz = (box.min.z + box.max.z) / 2;
+    inner.position.set(-cx, 0, -cz); // centre the footprint on the tile
+    container.add(inner);
+
+    const radius = R_IN + 1.55;
+    const halfArc = (Math.PI / TOTAL_TILES) * 0.9; // usable half of the wedge
+    const maxRadial = R_OUT - R_IN - 0.8;
+    let fit = 0.86;
+    for (let i = 0; i < 5; i++) {
+      const radialHalf = (size.z * fit) / 2;
+      const innerRadius = Math.max(R_IN + 0.25, radius - radialHalf);
+      const maxTangential = 2 * Math.tan(halfArc) * innerRadius;
+      fit = Math.min(
+        0.86,
+        maxTangential / Math.max(0.001, size.x),
+        maxRadial / Math.max(0.001, size.z),
+      );
+    }
+    container.userData.fitScale = fit;
+    container.scale.setScalar(fit);
+    const a = tileAngle(tileId);
+    container.position.set(Math.cos(a) * radius, BOARD_Y + 0.06, Math.sin(a) * radius);
+    container.rotation.y = -a + Math.PI / 2;
+    container.updateMatrixWorld(true);
+    return fit;
+  }
+
   addLandmarkOrDefaultProp(parent, tile, angle) {
     const { group, animations } = buildTileLandmark(tile);
-    const pos = tileWorldPos(tile.id, R_IN + 1.55);
-    group.position.set(pos.x, BOARD_Y + 0.06, pos.z);
-    group.rotation.y = -angle + Math.PI / 2;
-    group.scale.setScalar(0.86);
-    parent.add(group);
+    const container = new THREE.Group();
+    parent.add(container);
+    this.fitTileProp(container, group, tile.id);
+    void angle;
     if (animations && animations.length > 0) {
       this.landmarkAnims.push(...animations);
     }
@@ -1547,7 +1615,7 @@ export class Scene3D {
     // Quality sliders can rebuild while dragging; dispose old model resources to
     // avoid a GPU-memory leak after repeated custom graphics changes.
     for (const spring of this.buildingSprings) {
-      if (spring.group === group) spring.group.scale.set(1, 1, 1);
+      if (spring.group === group) spring.group.scale.setScalar(group.userData.fitScale || 0.86);
     }
     this.buildingSprings = this.buildingSprings.filter((spring) => spring.group !== group);
     while (group.children.length > 0) {
@@ -1560,11 +1628,13 @@ export class Scene3D {
       group.remove(child);
     }
     if (level <= 0) return;
-    group.add(
+    this.fitTileProp(
+      group,
       buildUpgradeStructure(level, ownerColor, {
         heightScale: this.graphics?.buildingHeight || 1,
         detail: this.graphics?.detail || 1,
-      })
+      }),
+      tileId,
     );
     if (this.pixelStyle) {
       group.traverse((object) => {
@@ -1589,7 +1659,7 @@ export class Scene3D {
       });
       this.spawnBurst(tileWorldPos(tileId, R_MID), 'sparkles', ownerColor);
     } else {
-      group.scale.set(1, 1, 1);
+      group.scale.setScalar(group.userData.fitScale || 0.86);
     }
   }
 
@@ -2013,9 +2083,10 @@ export class Scene3D {
         const eased = 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
         const sy = Math.max(0.05, eased);
         const sxz = 1 + (1 - t) * 0.14 * Math.cos(t * Math.PI * 2);
-        s.group.scale.set(sxz, sy, sxz);
+        const base = s.group.userData.fitScale || 1;
+        s.group.scale.set(sxz * base, sy * base, sxz * base);
         if (t >= 1) {
-          s.group.scale.set(1, 1, 1);
+          s.group.scale.setScalar(base);
           this.buildingSprings.splice(i, 1);
         }
       }
