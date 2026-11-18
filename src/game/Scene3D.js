@@ -431,6 +431,30 @@ function seededRandom(seed) {
   };
 }
 
+/** Soft radial glow (dipakai untuk halo lampu taman & genangan cahayanya). */
+function makeGlowTexture(pixel = false) {
+  const size = pixel ? 32 : 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.35, 'rgba(255,236,178,0.72)');
+  g.addColorStop(0.7, 'rgba(255,214,120,0.26)');
+  g.addColorStop(1, 'rgba(255,200,90,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  if (pixel) {
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+  }
+  return tex;
+}
+
 export class Scene3D {
   constructor(container, onSelectTile = null, onCinematicChange = null) {
     this.container = container;
@@ -661,26 +685,99 @@ export class Scene3D {
     }
 
     // Black street lamps with round cream globes around the park walkway (gameplay-2.jpg!)
+    // Setiap lampu taman punya jam nyala sendiri + halo dan genangan cahaya, jadi
+    // sore hari lampu menyala satu per satu seperti lampu jalan sungguhan.
     const poleMat = new THREE.MeshStandardMaterial({ color: '#2b323b', roughness: 0.55 });
-    const bulbMat = new THREE.MeshStandardMaterial({ color: '#fffde7', emissive: '#fef08a', emissiveIntensity: 0.35 });
+    const glowTex = makeGlowTexture(this.pixelStyle);
+    this.lampGlowTexture = glowTex;
+    this.parkLamps = [];
+    const lampSpots = [];
     for (let p = -18; p <= 18; p += 6) {
-      const spots = [
+      for (const [lx, lz] of [
         [p, 22.8],
         [p, -22.8],
         [22.8, p],
         [-22.8, p],
-      ];
-      for (const [lx, lz] of spots) {
+      ]) {
         if (Math.abs(lx) > 21 && Math.abs(lz) > 21) continue;
+        lampSpots.push([lx, lz]);
+      }
+    }
+    // urutan nyala mengikuti keliling taman (seperti satu sirkuit lampu jalan)
+    lampSpots
+      .map(([x, z], i) => ({ x, z, i, angle: (Math.atan2(z, x) + Math.PI * 2) % (Math.PI * 2) }))
+      .sort((a, b) => a.angle - b.angle)
+      .forEach((spot, order) => {
+        const { x: lx, z: lz } = spot;
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 3.4, 6), poleMat);
         pole.position.set(lx, 1.7, lz);
+        pole.castShadow = true;
         this.scene.add(pole);
+
+        const bulbMat = new THREE.MeshStandardMaterial({
+          color: '#fffde7',
+          emissive: '#ffe9a3',
+          emissiveIntensity: 0,
+        });
         const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 8), bulbMat);
         bulb.position.set(lx, 3.5, lz);
         this.scene.add(bulb);
+
+        const halo = new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: glowTex,
+            color: '#ffe6a8',
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          }),
+        );
+        halo.scale.set(2.6, 2.6, 1);
+        halo.position.set(lx, 3.5, lz);
+        this.scene.add(halo);
+
+        const pool = new THREE.Mesh(
+          new THREE.CircleGeometry(2.9, 20),
+          new THREE.MeshBasicMaterial({
+            map: glowTex,
+            color: '#ffdf9c',
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+          }),
+        );
+        pool.rotation.x = -Math.PI / 2;
+        pool.position.set(lx, 0.09, lz);
+        this.scene.add(pool);
+
+        // beberapa lampu terdekat papan juga benar-benar menerangi jalan
+        // (dibatasi 4 buah supaya HP tetap ringan)
+        let light = null;
+        if (!this.isCompactViewport && this.parkLamps.length % 7 === 0 && this.parkLamps.filter((l) => l.light).length < 4) {
+          light = new THREE.PointLight('#ffd79a', 0, 16, 2);
+          light.position.set(lx, 3.4, lz);
+          this.scene.add(light);
+        }
+
+        this.parkLamps.push({
+          x: lx,
+          z: lz,
+          bulbMat,
+          halo,
+          pool,
+          light,
+          level: 0,
+          // satu per satu: 17.55 → 18.35, dengan jitter kecil tiap lampu
+          onAt: 17.55 + (order / Math.max(1, lampSpots.length - 1)) * 0.8 + (spot.i % 3) * 0.03,
+          offAt: 5.4 + (order / Math.max(1, lampSpots.length - 1)) * 0.7,
+          flicker: 0,
+          on: false,
+        });
         solid(lx, lz, 0.24, 0.24, 3.8);
-      }
-    }
+      });
 
     // Multi-tone low-poly round & pine trees (exact palette of gameplay-1 & gameplay-2!)
     const trunkMat = new THREE.MeshStandardMaterial({ color: '#784824', roughness: 0.9 });
@@ -847,10 +944,167 @@ export class Scene3D {
     // Detail atap & fasad supaya bangunan terlihat seperti ruko Indonesia asli:
     // tandon air, AC tempel, kanopi toko bergaris, antena, dan tangga atap.
     this.buildCityDetails(cityDetail);
+    this.buildCityWindows(cityDetail);
 
     // Kota luar: kampung, kawasan industri, rice fields, bukit & jalan tol yang
     // membuat peta terasa sangat luas (radius ±300) tanpa membebani render.
     this.buildOuterCity();
+  }
+
+  /** Jendela gedung kota: SATU InstancedMesh berisi semua jendela, masing-masing
+      punya jam nyala/mati sendiri. Sore hari jendela menyala berkelompok per
+      gedung (seperti rumah tangga sungguhan), sebagian tetap gelap. */
+  buildCityWindows(buildings) {
+    if (!buildings.length) return;
+    const rand = seededRandom(31337);
+    const COLS = [14, 74, 134, 194]; // posisi kolom pada tekstur fasad 256 px
+    const FLOORS = [26, 90, 154, 218, 282, 346];
+    const warm = ['#ffe6a3', '#ffd98a', '#fff3c4', '#ffcf7a', '#ffdcb0', '#dfe9ff'];
+    const items = [];
+
+    for (const b of buildings) {
+      const faces = [
+        { nx: 1, nz: 0, width: b.d, rot: Math.PI / 2, ox: b.w / 2 },
+        { nx: -1, nz: 0, width: b.d, rot: -Math.PI / 2, ox: b.w / 2 },
+        { nx: 0, nz: 1, width: b.w, rot: 0, ox: b.d / 2 },
+        { nx: 0, nz: -1, width: b.w, rot: Math.PI, ox: b.d / 2 },
+      ];
+      // satu gedung ≈ satu rumah tangga: jam nyalanya berdekatan
+      const base = 17.2 + rand() * 4.2;
+      const offAt = 5.1 + rand() * 1.5;
+      const density = 0.42 + rand() * 0.46;
+      for (const f of faces) {
+        for (let c = 0; c < COLS.length; c++) {
+          for (let r = 0; r < FLOORS.length; r++) {
+            if (rand() > density) continue;
+            const u = (COLS[c] + 14) / 256;
+            const v = (FLOORS[r] + 18) / 512;
+            const y = b.h * (1 - v);
+            if (y < 2.6) continue; // lantai toko punya lampu sendiri
+            const neverLit = rand() < 0.2;
+            const along = (u - 0.5) * f.width;
+            items.push({
+              x: b.x + f.nx * (f.ox + 0.05) + (f.nz !== 0 ? along : 0),
+              z: b.z + f.nz * (f.ox + 0.05) + (f.nx !== 0 ? along : 0),
+              y,
+              rot: f.rot,
+              sx: (28 / 256) * f.width * 0.8,
+              sy: (36 / 512) * b.h * 0.8,
+              color: warm[Math.floor(rand() * warm.length)],
+              // ±20% jendela memang dibiarkan gelap semalaman (kamar kosong)
+              ...(neverLit
+                ? { onAt: Infinity, offAt: -1 }
+                : { onAt: base + rand() * 0.6, offAt: offAt + rand() * 0.45 }),
+              on: false,
+            });
+          }
+        }
+      }
+    }
+    if (!items.length) return;
+
+    const mesh = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ toneMapped: false }),
+      items.length,
+    );
+    mesh.name = 'cityWindows';
+    mesh.frustumCulled = false;
+    const dummy = new THREE.Object3D();
+    items.forEach((w, i) => {
+      w.index = i;
+      dummy.position.set(w.x, w.y, w.z);
+      dummy.rotation.set(0, w.rot, 0);
+      dummy.scale.set(0, 0, 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setColorAt(i, new THREE.Color(w.color));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this.scene.add(mesh);
+
+    this.cityWindows = {
+      mesh,
+      items,
+      dummy,
+      byOn: [...items].sort((a, b) => a.onAt - b.onAt),
+      byOff: [...items].sort((a, b) => a.offAt - b.offAt),
+      onPtr: 0,
+      offPtr: 0,
+      lastHour: -1,
+      dirty: false,
+    };
+    this.syncCityWindows(0, true);
+  }
+
+  /** Nyalakan/matikan jendela sesuai jam kota (hanya yang berubah, bukan semua). */
+  syncCityWindows(hour, force = false) {
+    const st = this.cityWindows;
+    if (!st) return;
+    const apply = (w, on) => {
+      if (w.on === on) return;
+      w.on = on;
+      const d = st.dummy;
+      d.position.set(w.x, w.y, w.z);
+      d.rotation.set(0, w.rot, 0);
+      if (on) d.scale.set(w.sx, w.sy, 1);
+      else d.scale.set(0, 0, 0);
+      d.updateMatrix();
+      st.mesh.setMatrixAt(w.index, d.matrix);
+      st.dirty = true;
+    };
+    const backwards = hour < st.lastHour - 0.0005;
+    if (force || backwards) {
+      st.onPtr = 0;
+      st.offPtr = 0;
+      for (const w of st.items) apply(w, hour >= w.onAt || hour < w.offAt);
+      while (st.onPtr < st.byOn.length && st.byOn[st.onPtr].onAt <= hour) st.onPtr += 1;
+      while (st.offPtr < st.byOff.length && st.byOff[st.offPtr].offAt <= hour) st.offPtr += 1;
+    } else {
+      while (st.onPtr < st.byOn.length && st.byOn[st.onPtr].onAt <= hour) {
+        apply(st.byOn[st.onPtr], true);
+        st.onPtr += 1;
+      }
+      while (st.offPtr < st.byOff.length && st.byOff[st.offPtr].offAt <= hour) {
+        apply(st.byOff[st.offPtr], false);
+        st.offPtr += 1;
+      }
+    }
+    st.lastHour = hour;
+    if (st.dirty) {
+      st.mesh.instanceMatrix.needsUpdate = true;
+      st.dirty = false;
+    }
+  }
+
+  /** Lampu taman menyala satu per satu (dengan kedipan singkat) + genangan cahaya. */
+  updateCityLights(hour, dt) {
+    this.syncCityWindows(hour);
+    const lamps = this.parkLamps;
+    if (!lamps?.length) return;
+    for (const lamp of lamps) {
+      const shouldOn = hour >= lamp.onAt || hour < lamp.offAt;
+      if (shouldOn !== lamp.on) {
+        lamp.on = shouldOn;
+        lamp.flicker = shouldOn ? 0.85 + Math.random() * 0.5 : 0;
+      }
+      const target = lamp.on ? 1 : 0;
+      const speed = lamp.on ? 1.6 : 3.2;
+      lamp.level += Math.max(-speed * dt, Math.min(speed * dt, target - lamp.level));
+      let flick = 1;
+      if (lamp.flicker > 0) {
+        lamp.flicker = Math.max(0, lamp.flicker - dt);
+        flick = 0.2 + 0.8 * Math.abs(Math.sin(lamp.flicker * 24));
+      }
+      const lv = Math.max(0, lamp.level) * flick;
+      lamp.bulbMat.emissiveIntensity = lv * 3.4;
+      lamp.halo.material.opacity = lv * 0.6;
+      lamp.pool.material.opacity = lv * 0.4;
+      lamp.halo.visible = lv > 0.01;
+      lamp.pool.visible = lv > 0.01;
+      if (lamp.light) lamp.light.intensity = lv * 2.2;
+    }
   }
 
   /** Rooftop tanks, AC units, shop awnings and antennas for the core buildings.
@@ -1974,6 +2228,18 @@ export class Scene3D {
         }
       }
     }
+    if (this.parkLamps?.length) {
+      const glow = makeGlowTexture(pixel);
+      const old = this.lampGlowTexture;
+      for (const lamp of this.parkLamps) {
+        lamp.halo.material.map = glow;
+        lamp.halo.material.needsUpdate = true;
+        lamp.pool.material.map = glow;
+        lamp.pool.material.needsUpdate = true;
+      }
+      this.lampGlowTexture = glow;
+      if (old) old.dispose();
+    }
     if (this.dice?.length) {
       for (const die of this.dice) {
         for (const mat of die.materials || []) {
@@ -2680,6 +2946,8 @@ export class Scene3D {
       // Kanopi toko dicek berkala (murah: hanya bila jumlah props berubah).
       this.awningTick = (this.awningTick || 0) + 1;
       if (this.awningTick % 40 === 0) this.refreshAwningClearance();
+      // Lampu gedung & lampu taman: sore hari menyala satu per satu.
+      this.updateCityLights(this.ambient.hour, dt);
     }
 
     if (this.flagMesh) {
