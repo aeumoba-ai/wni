@@ -312,6 +312,17 @@ function makeBuildingWindowTexture(baseHex) {
   return tex;
 }
 
+/** Tiny deterministic PRNG so the outer city looks the same on every reload. */
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export class Scene3D {
   constructor(container, onSelectTile = null, onCinematicChange = null) {
     this.container = container;
@@ -324,11 +335,12 @@ export class Scene3D {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#8bc8ea');
-    this.scene.fog = new THREE.Fog('#9cd0ee', 66, 145);
+    // Fog reaches far out so the outer districts read as distance, not as a wall.
+    this.scene.fog = new THREE.Fog('#9cd0ee', 150, 620);
 
     const w = container.clientWidth || window.innerWidth;
     const h = container.clientHeight || window.innerHeight;
-    this.camera = new THREE.PerspectiveCamera(40, w / h, 0.5, 230);
+    this.camera = new THREE.PerspectiveCamera(40, w / h, 0.5, 1400);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -451,6 +463,7 @@ export class Scene3D {
   setupLights() {
     const hemi = new THREE.HemisphereLight('#d6efff', '#59ad42', 0.96);
     this.scene.add(hemi);
+    this.hemiLight = hemi;
 
     const sun = new THREE.DirectionalLight('#fff9eb', 1.38);
     sun.position.set(22, 48, 30);
@@ -478,7 +491,7 @@ export class Scene3D {
 
     // Lush vibrant green lawn (matching gameplay-1 & gameplay-2!)
     const grass = new THREE.Mesh(
-      new THREE.PlaneGeometry(190, 190),
+      new THREE.PlaneGeometry(720, 720),
       new THREE.MeshStandardMaterial({ color: '#6ec44a', roughness: 0.9 })
     );
     grass.rotation.x = -Math.PI / 2;
@@ -718,6 +731,331 @@ export class Scene3D {
       solid(bpx, bpz, bw / 2, bd / 2, bh);
     });
 
+    // Kota luar: kampung, kawasan industri, rice fields, bukit & jalan tol yang
+    // membuat peta terasa sangat luas (radius ±300) tanpa membebani render.
+    this.buildOuterCity();
+  }
+
+  /* ====================== KOTA LUAR (PETA TERASA SANGAT LUAS) ==============
+     Everything past the core neighbourhood is built from a handful of
+     InstancedMesh objects (1 draw call each) so the extra width costs almost
+     nothing: street grid + hundreds of buildings, a distant CBD, a toll road
+     on pillars, sawah patches, tree lines and far hills on the horizon. */
+
+  buildOuterCity() {
+    const rand = seededRandom(20261118);
+    const g = new THREE.Group();
+    g.name = 'outerCity';
+    this.scene.add(g);
+    this.outerCity = g;
+
+    const streetMat = new THREE.MeshStandardMaterial({ color: '#3b424e', roughness: 0.95 });
+    const paintMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', roughness: 0.9 });
+
+    // --- 1. Outer street grid (a real city keeps going past our crossroads) --
+    const streets = [];
+    for (let r = 70; r <= 320; r += 37) streets.push(r, -r);
+    const stripLen = 700;
+    for (const x of streets) {
+      const road = new THREE.Mesh(new THREE.BoxGeometry(8, 0.06, stripLen), streetMat);
+      road.position.set(x, 0.035, 0);
+      road.receiveShadow = false;
+      g.add(road);
+    }
+    for (const z of streets) {
+      const road = new THREE.Mesh(new THREE.BoxGeometry(stripLen, 0.06, 8), streetMat);
+      road.position.set(0, 0.033, z);
+      road.receiveShadow = false;
+      g.add(road);
+    }
+    // A light centre line on the two nearest avenues to give the streets scale.
+    for (const x of [70, -70, 144, -144]) {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.02, stripLen - 40), paintMat);
+      line.position.set(x, 0.07, 0);
+      g.add(line);
+    }
+
+    // --- 2. Hundreds of district buildings around the core -------------------
+    // Three bands so the city reads like a real one from above: kampung houses
+    // close to the park, mid-rise neighbourhoods around them, and a taller
+    // outer city that melts into the fog.
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+    // Satu tekstur jendela dipakai bersama semua gedung luar (instanced → 1 draw call).
+    const bodyMat = new THREE.MeshStandardMaterial({
+      map: makeBuildingWindowTexture('#efeee8'),
+      roughness: 0.78,
+      metalness: 0,
+    });
+    const roofMatOuter = new THREE.MeshStandardMaterial({ roughness: 0.85 });
+    const bands = [
+      {
+        // kampung: 1–2 lantai, atap tanah liat, warna hangat
+        min: 56, max: 118, skip: 0.16, cols: 3,
+        h: [3.4, 6.8], w: [3.6, 5.6],
+        body: ['#f3e6d0', '#f6efdc', '#e8ddc6', '#efe4d3', '#dfe6d5', '#f7e2c8'],
+        roof: ['#b4593c', '#c96a45', '#a34f37', '#c9a06a', '#8f4a36'],
+      },
+      {
+        // perumahan & ruko: 2–5 lantai
+        min: 118, max: 196, skip: 0.2, cols: 3,
+        h: [7, 17], w: [4.4, 7.4],
+        body: ['#ece9e1', '#e0e7ec', '#f2e8da', '#e2eae2', '#eae4eb', '#dfe7f2'],
+        roof: ['#c9d3dc', '#b7c2cc', '#9fb0bc', '#d5c3ae'],
+      },
+      {
+        // kota luar: 6–16 lantai, makin jauh makin tinggi
+        min: 196, max: 330, skip: 0.3, cols: 3,
+        h: [16, 38], w: [5.5, 9.5],
+        body: ['#dbe3ec', '#cfd9e6', '#e3e8ef', '#d6dfe9', '#c8d4e2'],
+        roof: ['#aebbcb', '#9aa9bb', '#bcc7d4'],
+      },
+    ];
+    const spots = [];
+    const pads = [];
+    for (let gx = -320; gx <= 320; gx += 27) {
+      for (let gz = -320; gz <= 320; gz += 27) {
+        const cellR = Math.hypot(gx, gz);
+        if (cellR < 58) continue; // the core neighbourhood is built by hand
+        const band = bands.find((b) => cellR >= b.min && cellR < b.max);
+        if (!band) continue;
+        const cols = rand() > 0.42 ? band.cols : Math.max(2, band.cols - 1);
+        const cell = 21;
+        // Perkerasan blok: kawasan yang sudah dibangun bukan rumput kosong.
+        if (band.min >= 118) {
+          pads.push({
+            x: gx, z: gz, w: cell + 5, d: cell + 5,
+            color: rand() > 0.5 ? '#b9bdc2' : '#c6c0b3',
+          });
+        }
+        for (let i = 0; i < cols; i++) {
+          for (let j = 0; j < cols; j++) {
+            if (rand() < band.skip) continue; // yards, gardens, empty plots
+            const bx = gx + (i - (cols - 1) / 2) * (cell / cols + 1.4) + (rand() - 0.5) * 1.6;
+            const bz = gz + (j - (cols - 1) / 2) * (cell / cols + 1.4) + (rand() - 0.5) * 1.6;
+            const r = Math.hypot(bx, bz);
+            if (r < 58) continue;
+            // keep the avenue grid clear so the streets stay visible
+            if (Math.abs(bx - Math.round(bx / 37) * 37) < 7) continue;
+            if (Math.abs(bz - Math.round(bz / 37) * 37) < 7) continue;
+            const t = Math.min(1, (r - band.min) / (band.max - band.min));
+            const w = band.w[0] + rand() * (band.w[1] - band.w[0]);
+            const d = band.w[0] + rand() * (band.w[1] - band.w[0]);
+            const h = band.h[0] + rand() * (band.h[1] - band.h[0]) * (0.6 + t * 0.8);
+            spots.push({
+              x: bx, z: bz, w, d, h: Math.max(2.4, h),
+              color: band.body[Math.floor(rand() * band.body.length)],
+              roof: band.roof[Math.floor(rand() * band.roof.length)],
+            });
+          }
+        }
+      }
+    }
+    const bodies = new THREE.InstancedMesh(boxGeo, bodyMat, spots.length);
+    const roofs = new THREE.InstancedMesh(boxGeo, roofMatOuter, spots.length);
+    const m = new THREE.Matrix4();
+    const c = new THREE.Color();
+    spots.forEach((b, i) => {
+      m.makeScale(b.w, b.h, b.d).setPosition(b.x, b.h / 2, b.z);
+      bodies.setMatrixAt(i, m);
+      bodies.setColorAt(i, c.set(b.color));
+      m.makeScale(b.w * 1.08, 0.45, b.d * 1.08).setPosition(b.x, b.h + 0.22, b.z);
+      roofs.setMatrixAt(i, m);
+      roofs.setColorAt(i, c.set(b.roof));
+    });
+    bodies.instanceMatrix.needsUpdate = true;
+    roofs.instanceMatrix.needsUpdate = true;
+    bodies.frustumCulled = false;
+    roofs.frustumCulled = false;
+    g.add(bodies, roofs);
+
+    if (pads.length) {
+      const padMesh = new THREE.InstancedMesh(
+        boxGeo,
+        new THREE.MeshStandardMaterial({ roughness: 0.95 }),
+        pads.length,
+      );
+      pads.forEach((p, i) => {
+        m.makeScale(p.w, 0.05, p.d).setPosition(p.x, 0.045, p.z);
+        padMesh.setMatrixAt(i, m);
+        padMesh.setColorAt(i, c.set(p.color));
+      });
+      padMesh.instanceMatrix.needsUpdate = true;
+      padMesh.frustumCulled = false;
+      g.add(padMesh);
+    }
+
+    // --- 3. Distant CBD: a cluster of towers on one horizon ----------------
+    const towers = [];
+    for (let i = 0; i < 34; i++) {
+      const a = -0.75 + rand() * 0.7;
+      const dist = 210 + rand() * 90;
+      const w = 8 + rand() * 8;
+      const h = 34 + rand() * 62;
+      towers.push({ x: Math.cos(a) * dist, z: Math.sin(a) * dist, w, h });
+    }
+    const towerGeo = new THREE.BoxGeometry(1, 1, 1);
+    const towerMesh = new THREE.InstancedMesh(
+      towerGeo,
+      new THREE.MeshStandardMaterial({ color: '#cfd9e6', roughness: 0.55, metalness: 0.15 }),
+      towers.length,
+    );
+    towers.forEach((t, i) => {
+      m.makeScale(t.w, t.h, t.w * 0.9).setPosition(t.x, t.h / 2, t.z);
+      towerMesh.setMatrixAt(i, m);
+    });
+    towerMesh.instanceMatrix.needsUpdate = true;
+    towerMesh.frustumCulled = false;
+    g.add(towerMesh);
+
+    // --- 4. Toll road on pillars crossing the outskirts ---------------------
+    const tollMat = new THREE.MeshStandardMaterial({ color: '#e6e3da', roughness: 0.82 });
+    const tollDeck = new THREE.Mesh(new THREE.BoxGeometry(700, 1.0, 7), tollMat);
+    tollDeck.position.set(0, 12.5, -168);
+    g.add(tollDeck);
+    for (const dz of [-3.1, 3.1]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(700, 0.55, 0.35), tollMat);
+      rail.position.set(0, 13.2, -168 + dz);
+      g.add(rail);
+    }
+    const pillarGeo = new THREE.BoxGeometry(1.6, 12, 2.2);
+    const pillars = new THREE.InstancedMesh(pillarGeo, tollMat, 30);
+    for (let i = 0; i < 30; i++) {
+      m.makeTranslation(-290 + i * 20, 6, -168);
+      pillars.setMatrixAt(i, m);
+    }
+    pillars.instanceMatrix.needsUpdate = true;
+    pillars.frustumCulled = false;
+    g.add(pillars);
+
+    // --- 5. Rice fields & open land (sawah) in between ----------------------
+    const fieldMats = ['#7fbf4f', '#93cf62', '#6fb447', '#a8d873'].map(
+      (col) => new THREE.MeshStandardMaterial({ color: col, roughness: 0.95 }),
+    );
+    for (let i = 0; i < 26; i++) {
+      const a = rand() * Math.PI * 2;
+      const dist = 120 + rand() * 220;
+      const fx = Math.cos(a) * dist;
+      const fz = Math.sin(a) * dist;
+      const w = 22 + rand() * 34;
+      const d = 18 + rand() * 30;
+      const field = new THREE.Mesh(new THREE.PlaneGeometry(w, d), fieldMats[i % fieldMats.length]);
+      field.rotation.x = -Math.PI / 2;
+      field.rotation.z = (rand() - 0.5) * 0.5;
+      field.position.set(fx, 0.02, fz);
+      g.add(field);
+    }
+
+    // --- 6. Tree lines along the far streets -------------------------------
+    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.3, 2.4, 5);
+    const crownGeo = new THREE.SphereGeometry(1, 6, 5);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: '#784824', roughness: 0.9 });
+    const treePositions = [];
+    for (let i = 0; i < 300; i++) {
+      const a = rand() * Math.PI * 2;
+      const dist = 72 + rand() * 240;
+      const tx = Math.cos(a) * dist;
+      const tz = Math.sin(a) * dist;
+      // Keep the asphalt and the immediate park untouched.
+      const nearStreet = (v) => Math.abs(v - Math.round(v / 37) * 37) < 7;
+      if (nearStreet(tx) || nearStreet(tz)) continue;
+      treePositions.push([tx, tz, 1.6 + rand() * 1.5, rand()]);
+    }
+    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treePositions.length);
+    const crowns = new THREE.InstancedMesh(
+      crownGeo,
+      new THREE.MeshStandardMaterial({ roughness: 0.85 }),
+      treePositions.length,
+    );
+    const crownColors = ['#2d993e', '#4db844', '#1f7c37', '#3aa14a'];
+    treePositions.forEach(([tx, tz, s, r], i) => {
+      m.makeScale(s, s, s).setPosition(tx, s * 1.2, tz);
+      trunks.setMatrixAt(i, m);
+      m.makeScale(s * 1.5, s * 1.35, s * 1.5).setPosition(tx, s * 2.6, tz);
+      crowns.setMatrixAt(i, m);
+      crowns.setColorAt(i, c.set(crownColors[Math.floor(r * crownColors.length)]));
+    });
+    trunks.instanceMatrix.needsUpdate = true;
+    crowns.instanceMatrix.needsUpdate = true;
+    trunks.frustumCulled = false;
+    crowns.frustumCulled = false;
+    g.add(trunks, crowns);
+
+    // --- 7. Danau/waduk + landmark jauh (menambah kesan luas) ---------------
+    const waterMat = new THREE.MeshStandardMaterial({ color: '#2f7fb5', roughness: 0.35, metalness: 0.1 });
+    const lake = new THREE.Mesh(new THREE.CircleGeometry(52, 26), waterMat);
+    lake.rotation.x = -Math.PI / 2;
+    lake.scale.set(1.5, 0.85, 1);
+    lake.position.set(196, 0.05, 138);
+    g.add(lake);
+    const lakeBank = new THREE.Mesh(
+      new THREE.CircleGeometry(56, 26),
+      new THREE.MeshStandardMaterial({ color: '#c8b892', roughness: 0.95 }),
+    );
+    lakeBank.rotation.x = -Math.PI / 2;
+    lakeBank.scale.set(1.52, 0.86, 1);
+    lakeBank.position.set(196, 0.04, 138);
+    g.add(lakeBank);
+
+    const farLandMats = {
+      white: new THREE.MeshStandardMaterial({ color: '#f1f3f4', roughness: 0.6 }),
+      silver: new THREE.MeshStandardMaterial({ color: '#c3ccd4', roughness: 0.5, metalness: 0.2 }),
+      green: new THREE.MeshStandardMaterial({ color: '#2f7f4f', roughness: 0.7 }),
+      gold: new THREE.MeshStandardMaterial({ color: '#d9b04a', roughness: 0.45, metalness: 0.35 }),
+      red: new THREE.MeshStandardMaterial({ color: '#b23b2e', roughness: 0.7 }),
+    };
+    // Stadion (cincin besar) di barat daya
+    const stadium = new THREE.Mesh(new THREE.CylinderGeometry(38, 40, 13, 24, 1, true), farLandMats.silver);
+    stadium.position.set(-196, 6.5, 158);
+    g.add(stadium);
+    const stadiumField = new THREE.Mesh(new THREE.CircleGeometry(33, 24), new THREE.MeshStandardMaterial({ color: '#3f9b4f', roughness: 0.9 }));
+    stadiumField.rotation.x = -Math.PI / 2;
+    stadiumField.position.set(-196, 0.06, 158);
+    g.add(stadiumField);
+    // Menara TV + kubah masjid raya + menara air, jauh di timur laut
+    const tvTower = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 3.4, 96, 8), farLandMats.silver);
+    tvTower.position.set(238, 48, -196);
+    g.add(tvTower);
+    const tvPod = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 4, 12), farLandMats.white);
+    tvPod.position.set(238, 74, -196);
+    g.add(tvPod);
+    const domeBase = new THREE.Mesh(new THREE.BoxGeometry(44, 16, 44), farLandMats.white);
+    domeBase.position.set(-172, 8, -206);
+    g.add(domeBase);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(19, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), farLandMats.green);
+    dome.position.set(-172, 16, -206);
+    g.add(dome);
+    for (const [mx, mz] of [[-152, -186], [-192, -186]]) {
+      const minaret = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2.4, 40, 8), farLandMats.white);
+      minaret.position.set(mx, 20, mz);
+      g.add(minaret);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(3.2, 7, 8), farLandMats.gold);
+      cap.position.set(mx, 43, mz);
+      g.add(cap);
+    }
+    // Menara air kampung (warna cerah, jadi penanda arah)
+    for (const [wx, wz] of [[-120, 96], [132, -92], [96, 214]]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.0, 26, 6), farLandMats.silver);
+      leg.position.set(wx, 13, wz);
+      g.add(leg);
+      const tank = new THREE.Mesh(new THREE.SphereGeometry(6.4, 10, 8), farLandMats.red);
+      tank.position.set(wx, 29, wz);
+      g.add(tank);
+    }
+
+    // --- 8. Hills on the horizon -------------------------------------------
+    const hillMats = ['#6f9a7d', '#7fa88c', '#6a8f9c'].map(
+      (col) => new THREE.MeshStandardMaterial({ color: col, roughness: 1 }),
+    );
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2 + 0.35;
+      const dist = 430 + (i % 3) * 40;
+      const radius = 70 + ((i * 37) % 60);
+      const height = 42 + ((i * 23) % 46);
+      const hill = new THREE.Mesh(new THREE.ConeGeometry(radius, height, 7), hillMats[i % hillMats.length]);
+      hill.position.set(Math.cos(a) * dist, height / 2 - 6, Math.sin(a) * dist);
+      hill.rotation.y = a;
+      g.add(hill);
+    }
   }
 
   buildCircularBoard() {
@@ -1764,7 +2102,7 @@ export class Scene3D {
       // never let the scripted camera continue fighting their gesture.
       this.cameraCutscene = null;
     };
-    const clampRadius = (r) => Math.max(20, Math.min(54, r));
+    const clampRadius = (r) => Math.max(20, Math.min(115, r));
 
     const onDown = (e) => {
       if (this.mode !== 'game') return;
@@ -1893,6 +2231,60 @@ export class Scene3D {
     this.renderer.setSize(w, h);
   }
 
+  /* ================== WAKTU KOTA: WARNA LANGIT & CAHAYA ====================
+     The city clock (6 pagi → 5 pagi) also tints the sky, the fog and the sun so
+     the player can feel the pasar pagi, the siang heat, the sore golden hour
+     and the malam lights. Nilai dijaga tetap terang supaya papan tetap jelas. */
+
+  static DAY_PALETTE = [
+    // jam, langit, kabut, warna matahari, intensitas, hemisphere, hemi intensity
+    { h: 0, sky: '#243450', fog: '#2c3f60', sun: '#8fa8d8', sunI: 0.5, hemiSky: '#5a6f9c', hemiGround: '#22331f', hemiI: 0.62 },
+    { h: 4.6, sky: '#3d4f74', fog: '#52628a', sun: '#b9a6c8', sunI: 0.66, hemiSky: '#8fa2c4', hemiGround: '#2e4430', hemiI: 0.72 },
+    { h: 6.2, sky: '#e9b48f', fog: '#f0c5a3', sun: '#ffd9a8', sunI: 1.02, hemiSky: '#ffe2c4', hemiGround: '#4e8a3a', hemiI: 0.86 },
+    { h: 9, sky: '#8bc8ea', fog: '#9cd0ee', sun: '#fff9eb', sunI: 1.38, hemiSky: '#d6efff', hemiGround: '#59ad42', hemiI: 0.96 },
+    { h: 15.5, sky: '#8bc8ea', fog: '#a3d2ea', sun: '#fff6e0', sunI: 1.32, hemiSky: '#dcf0ff', hemiGround: '#5cb045', hemiI: 0.95 },
+    { h: 17.6, sky: '#f0a978', fog: '#f6bc90', sun: '#ffcf94', sunI: 1.14, hemiSky: '#ffe0bb', hemiGround: '#4f8b3b', hemiI: 0.9 },
+    { h: 19.2, sky: '#5c6a96', fog: '#6a7aa6', sun: '#c9b6d8', sunI: 0.72, hemiSky: '#a9b6d6', hemiGround: '#31462c', hemiI: 0.74 },
+    { h: 21.5, sky: '#2b3c5c', fog: '#33456a', sun: '#93aada', sunI: 0.54, hemiSky: '#63779f', hemiGround: '#25361f', hemiI: 0.66 },
+    { h: 24, sky: '#243450', fog: '#2c3f60', sun: '#8fa8d8', sunI: 0.5, hemiSky: '#5a6f9c', hemiGround: '#22331f', hemiI: 0.62 },
+  ];
+
+  applyTimeOfDay(hour = 9) {
+    if (this._lastHour !== undefined && Math.abs(this._lastHour - hour) < 0.02) return;
+    this._lastHour = hour;
+    const pal = Scene3D.DAY_PALETTE;
+    let a = pal[0];
+    let b = pal[pal.length - 1];
+    for (let i = 0; i < pal.length - 1; i++) {
+      if (hour >= pal[i].h && hour <= pal[i + 1].h) {
+        a = pal[i];
+        b = pal[i + 1];
+        break;
+      }
+    }
+    const t = b.h === a.h ? 0 : (hour - a.h) / (b.h - a.h);
+    const lerp = (x, y) => x + (y - x) * t;
+    if (!this._skyA) {
+      this._skyA = new THREE.Color();
+      this._skyB = new THREE.Color();
+    }
+    const mix = (ka, kb, target) => target.copy(this._skyA.set(ka)).lerp(this._skyB.set(kb), t);
+    mix(a.sky, b.sky, this.scene.background);
+    if (this.scene.fog) mix(a.fog, b.fog, this.scene.fog.color);
+    if (this.hemiLight) {
+      mix(a.hemiSky, b.hemiSky, this.hemiLight.color);
+      mix(a.hemiGround, b.hemiGround, this.hemiLight.groundColor);
+      this.hemiLight.intensity = lerp(a.hemiI, b.hemiI);
+    }
+    if (this.sunLight) {
+      mix(a.sun, b.sun, this.sunLight.color);
+      this.sunLight.intensity = lerp(a.sunI, b.sunI);
+      // the sun climbs and sets: a slight arc keeps the shadows alive
+      const dayT = Math.max(0, Math.min(1, (hour - 5.4) / 13.2));
+      this.sunLight.position.set(22 - dayT * 40, 30 + Math.sin(dayT * Math.PI) * 30, 30 - dayT * 55);
+    }
+  }
+
   animate() {
     if (this.disposed) return;
     this.rafId = requestAnimationFrame(this.animate);
@@ -1901,7 +2293,10 @@ export class Scene3D {
     const elapsed = this.clock.elapsedTime;
     const now = performance.now();
 
-    if (this.ambient) this.ambient.update(dt);
+    if (this.ambient) {
+      this.ambient.update(dt);
+      this.applyTimeOfDay(this.ambient.hour);
+    }
 
     if (this.flagMesh) {
       this.flagMesh.rotation.y = Math.sin(elapsed * 4.2) * 0.16;

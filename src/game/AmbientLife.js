@@ -46,6 +46,96 @@ const LEVEL_WEIGHTS = [
   ['ramai', 0.3],
 ];
 
+/* ============================== JAM KOTA (WAKTU JUALAN) =====================
+   The city now has its own clock. A full day (24 jam) passes in DAY_SECONDS
+   seconds, starting in the early morning, so a single match sees the pasar
+   pagi, the siang crowd, the sore snacks and the night grills — and the
+   vendors standing on the pavement keep changing with it. */
+
+export const DAY_SECONDS = 300; // 5 real minutes = 1 hari di kota
+export const DAY_START_HOUR = 6; // mulai pagi, saat pasar baru buka
+
+/* Every vendor has its own selling hours (jam buka, jam tutup). Windows that
+   cross midnight simply close later than 24 (e.g. martabak 17 → 25). */
+const STALL_HOURS = {
+  warung: [0, 24], // warung bu Tini buka 24 jam
+  gorengan: [5.5, 20],
+  bensin: [5, 19],
+  halte: [4, 24], // halte is permanent map furniture, always staffed
+  cilok: [9, 17],
+  kelapa: [8, 18],
+  tukangcendol: [10, 19],
+  es: [9, 17],
+  siomay: [11, 20],
+  bakso: [10, 21],
+  balon: [15, 19],
+  sate: [16, 23],
+  jagung: [16, 23],
+  tahubulat: [14, 22],
+  martabak: [17, 25],
+};
+
+/* Street traffic is not the same at 6 pagi and 8 malam: delman and gerobak
+   start early, box trucks only run in daylight, ojol runs nearly all day. */
+const VEHICLE_HOURS = {
+  gerobak: [5, 17],
+  tukangsayur: [4.5, 12],
+  delman: [5.5, 19],
+  sepeda: [5, 19],
+  becak: [5, 23],
+  becakbarang: [6, 19],
+  bajaj: [6, 23],
+  angkot: [4.5, 24],
+  bus: [4.5, 25], // bus malam tetap jalan
+  truk: [5, 25],
+  boxtruck: [6, 22],
+  elf: [5, 23],
+  pickup: [5, 24],
+  sedan: [4.5, 26],
+  vespa: [5.5, 24],
+  motor: [4.5, 26],
+  ojol: [4.5, 26],
+  martabak: [16, 25],
+};
+
+/* People keep office hours too (jam kerja), so the pavement mix shifts. */
+const ROLE_HOURS = {
+  anaksekolah: [6, 14],
+  anak: [6.5, 19],
+  jogging: [4.5, 9],
+  tukangpos: [7, 16],
+  kurir: [7, 21],
+  petugas: [5, 16],
+  pedagang: [4.5, 22.5],
+  tukangsayur: [4.5, 11],
+  tukangbangunan: [7, 17],
+  penjualkoran: [5.5, 17],
+  pengamen: [9, 25],
+  fotografer: [8, 21],
+  pasangan: [17, 23],
+  polisi: [5, 24],
+  ojol: [5, 24],
+  satpam: [17, 31], // shift malam
+  ibu: [6, 21],
+  warga: [5.5, 23.5],
+  tukangparkir: [6, 22],
+  nenek: [6, 18],
+};
+
+/** Is `hour` inside a [open, close) window? Windows may run past midnight,
+    either by closing at a number > 24 (e.g. satpam 17 → 31 = 07 pagi) or by
+    wrapping (e.g. martabak 17 → 25 = 01 dini hari). */
+function inHours(hour, window) {
+  if (!window) return true;
+  const [open, closeRaw] = window;
+  const close = closeRaw > 24 ? closeRaw - 24 : closeRaw;
+  if (close === open) return true; // buka 24 jam
+  if (closeRaw > 24 || close < open) return hour >= open || hour < close;
+  return hour >= open && hour < close;
+}
+
+const willOpen = (table, key, hour) => inHours(hour, table[key]);
+
 /* ------------------------------------------------------------------ utils */
 
 function seedFromString(input) {
@@ -124,6 +214,10 @@ export class AmbientLife {
     this.currentLevel = ACTIVITY_LEVELS.cukup;
     this.levelKey = 'cukup';
     this.moodDwell = between(this.rng, 26, 44);
+    // Jam kota: mulai pagi, satu hari penuh dalam DAY_SECONDS detik nyata.
+    this.hour = DAY_START_HOUR;
+    this.dayLength = DAY_SECONDS;
+    this.hourTick = -1;
     this.lights = { x: 'green', z: 'red' };
 
     this.shadow = !compact;
@@ -355,7 +449,8 @@ export class AmbientLife {
     this.levelKey = this.rollLevel();
     this.currentLevel = ACTIVITY_LEVELS[this.levelKey];
     this.moodDwell = between(this.rng, 24, 40);
-    this.applyLevel();
+    // Jam jualan: only the vendors open at this hour take a spot.
+    this.applySchedule();
   }
 
   rollLevel(exclude = null) {
@@ -390,8 +485,14 @@ export class AmbientLife {
         v.retiring = true;
       }
     });
-    this.walkers.forEach((w, i) => {
-      w.targetScale = i < budget.walkers ? 1 : 0;
+    // Two gates: the mood of the city decides how many people are out, the
+    // clock decides which professions are working. We count the on-duty people
+    // first and then take as many as the budget allows, so the pavement is never
+    // left empty just because the working shift sits late in the roster.
+    const onDuty = this.walkers.filter((w) => w.scheduleOpen !== false);
+    const allow = new Set(onDuty.slice(0, budget.walkers));
+    this.walkers.forEach((w) => {
+      w.targetScale = allow.has(w) ? 1 : 0;
     });
     // The halte (bus stop) is permanent map furniture; the street stalls open
     // and close in a seeded random order, so every match has a different market.
@@ -401,9 +502,75 @@ export class AmbientLife {
     permanent.forEach((s) => {
       s.targetScale = 1;
     });
-    openable.forEach((s, i) => {
+    // Only vendors whose jam jualan has started may take a slot; the rest are
+    // closed (gerobak ditutup, tikar digulung) until their hour comes round.
+    // A vendor never opens his lapak on top of someone: if a pedestrian happens
+    // to be standing on the spot, the stall waits for the next check.
+    const crowdFree = (s) => {
+      if (this.time < 0.5) return true;
+      const { x, z } = s.group.position;
+      const r = (s.footRadius || 1) + 0.55;
+      return !this.walkers.some((w) => {
+        if (w.targetScale <= 0) return false;
+        const dx = w.group.position.x - x;
+        const dz = w.group.position.z - z;
+        return dx * dx + dz * dz < r * r;
+      });
+    };
+    const inSeason = openable.filter((s) => s.scheduleOpen !== false && (s.targetScale > 0 || crowdFree(s)));
+    openable.forEach((s) => {
+      s.targetScale = 0;
+    });
+    inSeason.forEach((s, i) => {
       s.targetScale = i < slots ? 1 : 0;
     });
+  }
+
+  /* ------------------------------------------------------------ JAM KOTA */
+
+  /** Advance the city clock; re-check who is open for business every half hour. */
+  updateClock(dt) {
+    if (!this.dayLength || this.dayLength <= 0) return;
+    this.hour = (this.hour + (dt / this.dayLength) * 24) % 24;
+    const tick = Math.floor(this.hour * 2);
+    if (tick === this.hourTick) return;
+    this.hourTick = tick;
+    this.applySchedule();
+  }
+
+  /** Jump straight to a given hour (also used by QA / debug). */
+  setHour(hour) {
+    this.hour = ((hour % 24) + 24) % 24;
+    this.hourTick = -1;
+    this.applySchedule();
+  }
+
+  /** Label waktu untuk UI ("Pagi", "Siang", …). */
+  get dayPhase() {
+    const h = this.hour;
+    if (h < 4.5) return 'Malam';
+    if (h < 10) return 'Pagi';
+    if (h < 15) return 'Siang';
+    if (h < 18) return 'Sore';
+    if (h < 21) return 'Petang';
+    return 'Malam';
+  }
+
+  /** Recompute which stalls / vendors / street activities are "in season". */
+  applySchedule() {
+    const h = this.hour;
+    for (const s of this.stalls) {
+      s.scheduleOpen = s.permanent ? true : willOpen(STALL_HOURS, s.kind, h);
+      if (s.sign) s.sign.visible = s.scheduleOpen;
+    }
+    for (const w of this.walkers) {
+      w.scheduleOpen = willOpen(ROLE_HOURS, w.role, h);
+    }
+    // A closed kind is replaced the next time a vehicle leaves the map edge.
+    for (const v of this.vehicles) {
+      v.kindOpen = willOpen(VEHICLE_HOURS, v.kind, h);
+    }
+    this.applyLevel();
   }
 
   updateMood(dt) {
@@ -864,10 +1031,45 @@ export class AmbientLife {
     // The slow "street life" vehicles live in the kerb lane, fast traffic in the
     // inner lane, so the mix feels like a real Indonesian road.
     const kerbLane = Math.abs(lane.coord) > ROAD_CENTER;
-    const slow = ['becak', 'delman', 'gerobak', 'sepeda', 'bajaj', 'angkot', 'martabak', 'tukangsayur'];
-    const fast = ['motor', 'ojol', 'vespa', 'sedan', 'elf', 'pickup', 'boxtruck', 'truk', 'bus', 'angkot'];
-    if (lane.lightAxis === null) return pick(rand, ['bus', 'truk', 'boxtruck', 'sedan', 'elf']);
-    return pick(rand, kerbLane && rand() < 0.5 ? slow : fast);
+    const openNow = (k) => willOpen(VEHICLE_HOURS, k, this.hour);
+    const slowAll = ['becak', 'delman', 'gerobak', 'sepeda', 'bajaj', 'angkot', 'martabak', 'tukangsayur'];
+    const fastAll = ['motor', 'ojol', 'vespa', 'sedan', 'elf', 'pickup', 'boxtruck', 'truk', 'bus', 'angkot'];
+    // Only vehicles that actually operate at this hour may appear (no delman
+    // at midnight, no box truck before dawn), with a safe fallback.
+    const slow = slowAll.filter(openNow);
+    const fast = fastAll.filter(openNow);
+    if (lane.lightAxis === null) {
+      const toll = ['bus', 'truk', 'boxtruck', 'sedan', 'elf'].filter(openNow);
+      return pick(rand, toll.length ? toll : ['sedan']);
+    }
+    if (kerbLane && rand() < 0.5 && slow.length) return pick(rand, slow);
+    return pick(rand, fast.length ? fast : slow.length ? slow : ['sedan']);
+  }
+
+  /** Swap a vehicle for one that is open for business at the current hour.
+      Called when it leaves the map edge, so it never pops in mid-road. */
+  retuneVehicleKind(vehicle) {
+    if (vehicle.kindOpen !== false) return;
+    const want = this.rollVehicleKind(vehicle.lane, this.rng, 0);
+    const built = want === vehicle.kind ? null : this.buildVehicle(want, this.rng);
+    if (!built) {
+      // Same kind came up again — keep the model, just refresh its state.
+      vehicle.kindOpen = willOpen(VEHICLE_HOURS, vehicle.kind, this.hour);
+      return;
+    }
+    const visible = vehicle.group.visible;
+    this.group.remove(vehicle.group);
+    built.group.scale.setScalar(1.3);
+    built.group.visible = visible;
+    this.group.add(built.group);
+    vehicle.kind = want;
+    vehicle.group = built.group;
+    vehicle.length = built.length * 1.3;
+    vehicle.halfSum = undefined;
+    vehicle.speed = this.vehicleSpeed(want) * between(this.rng, 0.9, 1.12);
+    vehicle.baseSpeed = vehicle.speed;
+    vehicle.kindOpen = true;
+    this.placeVehicle(vehicle);
   }
 
   vehicleSpeed(kind) {
@@ -1215,7 +1417,8 @@ export class AmbientLife {
 
   /** Ground-level occupancy test for pedestrians: other props, trees, lamps,
       monuments, buildings and fellow walkers. */
-  walkBlocked(x, z, self, radius) {
+  /** Is (x, z) inside a prop (bin, pole, warung, tree…)? */
+  blockedByProp(x, z, radius) {
     for (const b of this.blockers) {
       if (b.walkable) continue; // open shelters: people walk underneath
       if (b.h !== undefined && b.h < 0.35) continue;
@@ -1224,6 +1427,11 @@ export class AmbientLife {
       const min = radius + (b.physR ?? b.r);
       if (dx * dx + dz * dz < min * min) return true;
     }
+    return false;
+  }
+
+  walkBlocked(x, z, self, radius) {
+    if (this.blockedByProp(x, z, radius)) return true;
     for (const other of this.walkers) {
       if (other === self || !other.group.visible) continue;
       const dx = x - other.group.position.x;
@@ -1267,6 +1475,10 @@ export class AmbientLife {
     }
     const rosterCount = 11 + Math.floor(rand() * 5); // 11..15 professions per match
     const roles = baseRoles.slice(0, Math.min(rosterCount, baseRoles.length));
+    // Every match needs someone who is still out at 2 pagi, otherwise the city
+    // would look abandoned in the small hours.
+    const nightShift = ['satpam', 'ojol', 'polisi', 'pengamen'];
+    if (!roles.some((r) => nightShift.includes(r))) roles[roles.length - 1] = 'satpam';
     const maxWalkers = Math.max(8, Math.round(ACTIVITY_LEVELS.ramai.walkers * 1.7));
     // Who strolls the park footpath and who walks along the shop fronts.
     const parkSlots = [];
@@ -1300,11 +1512,22 @@ export class AmbientLife {
         patrolEnd > 0 ? PAVEMENT_SPAN[1] : -PAVEMENT_SPAN[0],
       ];
 
-      // Spawn clear of every prop: nudge along the route until the spot is free.
+      // Spawn clear of every prop AND of the neighbours already standing there:
+      // nudge along the route until the spot is free.
       let startT = (slot / Math.max(1, slotCount)) * perimeter + between(rand, -0.6, 0.6);
       let startU = between(rand, patrolRange[0] + 1.5, patrolRange[1] - 1.5);
       const radius = 0.3;
-      for (let attempt = 0; attempt < 26; attempt++) {
+      const spotFree = (px, pz) => {
+        if (this.blockedByProp(px, pz, radius + 0.12)) return false;
+        for (const other of this.walkers) {
+          const dx = px - other.group.position.x;
+          const dz = pz - other.group.position.z;
+          if (dx * dx + dz * dz < 0.72 * 0.72) return false;
+        }
+        return true;
+      };
+      let spot = null;
+      for (let attempt = 0; attempt < 40; attempt++) {
         const probe = isPark ? ringPosition(half, startT, lateral) : this.patrolPosition({
           patrolAxis,
           patrolFixed,
@@ -1312,16 +1535,27 @@ export class AmbientLife {
           dir: 1,
           patrolRange,
         }, startU);
-        const clash = this.blockers.some((b) => !b.walkable && (b.physR ?? b.r) > 0.3
-          && Math.hypot(probe.x - b.x, probe.z - b.z) < (b.physR ?? b.r) + radius + 0.15);
-        if (!clash) break;
-        if (isPark) startT += 1.8;
+        if (spotFree(probe.x, probe.z)) {
+          spot = probe;
+          break;
+        }
+        if (isPark) startT += 1.6;
         else startU = patrolRange[0] + ((startU - patrolRange[0] + 2.2) % (patrolRange[1] - patrolRange[0]));
+      }
+      if (!spot) {
+        spot = isPark ? ringPosition(half, startT, lateral) : this.patrolPosition({
+          patrolAxis,
+          patrolFixed,
+          lateral,
+          dir: 1,
+          patrolRange,
+        }, startU);
       }
 
       const { group, legs, scale: personScale } = this.buildPerson(role, rand);
       group.visible = false;
       group.scale.setScalar(0.001);
+      group.position.set(spot.x, 0.09, spot.z);
       this.group.add(group);
 
       const base = {
@@ -1634,6 +1868,7 @@ export class AmbientLife {
         anchor: [ax, az],
         order: rand(),
         permanent: kind === 'halte',
+        footRadius: Math.max(0.6, foot - 0.25),
       });
     }
   }
@@ -1822,6 +2057,7 @@ export class AmbientLife {
 
   update(dt) {
     this.time += dt;
+    this.updateClock(dt);
     this.updateMood(dt);
 
     const speedScale = this.currentLevel.speed;
@@ -1903,6 +2139,9 @@ export class AmbientLife {
             continue;
           }
           const target = v.pos > ROAD_END ? -ROAD_END : ROAD_END;
+          // Out of sight at the map edge: an out-of-season vehicle is quietly
+          // replaced by one that is open at this hour of the city clock.
+          this.retuneVehicleKind(v);
           // Only re-enter when the other end of the lane is clear.
           if (this.laneSlotFree(lane, target, v, 1.5)) {
             v.pos = target;
@@ -2032,19 +2271,33 @@ export class AmbientLife {
         const limitB = b.lateralLimit ?? 0.75;
         const sign = a.lateral === b.lateral ? (i < j ? 1 : -1) : Math.sign(a.lateral - b.lateral) || 1;
         const push = Math.min(0.06, (MIN_WALK_SEP - d) * 0.35 + 0.01) * sign;
-        const newA = Math.max(-limitA, Math.min(limitA, a.lateral + push));
-        const newB = Math.max(-limitB, Math.min(limitB, b.lateral - push));
+        const tryLateral = (w, want, limit) => {
+          const cand = Math.max(-limit, Math.min(limit, want));
+          const pos = w.patrol ? this.patrolPosition({ ...w, lateral: cand }) : ringPosition(w.half, w.t, cand);
+          if (!this.blockedByProp(pos.x, pos.z, 0.3 * (w.baseScale || 1))) return { cand, pos };
+          return null;
+        };
+        const signA = tryLateral(a, a.lateral + push, limitA);
+        const signB = tryLateral(b, b.lateral - push, limitB);
+        const newA = signA ? signA.cand : a.lateral;
+        const newB = signB ? signB.cand : b.lateral;
+        // Only sidestep if the new spot is actually free — never shove a
+        // pedestrian into a bin, a pole or a warung.
         if (newA !== a.lateral) {
-          a.lateral = newA;
-          const pa = a.patrol ? this.patrolPosition(a) : ringPosition(a.half, a.t, a.lateral);
-          a.group.position.set(pa.x, a.group.position.y, pa.z);
-          a.group.rotation.y = pa.rot;
+          const pa = a.patrol ? this.patrolPosition({ ...a, lateral: newA }) : ringPosition(a.half, a.t, newA);
+          if (!this.blockedByProp(pa.x, pa.z, 0.3 * (a.baseScale || 1))) {
+            a.lateral = newA;
+            a.group.position.set(pa.x, a.group.position.y, pa.z);
+            a.group.rotation.y = pa.rot;
+          }
         }
         if (newB !== b.lateral) {
-          b.lateral = newB;
-          const pb = b.patrol ? this.patrolPosition(b) : ringPosition(b.half, b.t, b.lateral);
-          b.group.position.set(pb.x, b.group.position.y, pb.z);
-          b.group.rotation.y = pb.rot;
+          const pb = b.patrol ? this.patrolPosition({ ...b, lateral: newB }) : ringPosition(b.half, b.t, newB);
+          if (!this.blockedByProp(pb.x, pb.z, 0.3 * (b.baseScale || 1))) {
+            b.lateral = newB;
+            b.group.position.set(pb.x, b.group.position.y, pb.z);
+            b.group.rotation.y = pb.rot;
+          }
         }
       }
     }
