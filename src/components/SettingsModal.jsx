@@ -22,6 +22,8 @@ import {
   SlidersHorizontal,
   Grid3X3,
   Gauge,
+  Smartphone,
+  Zap,
 } from 'lucide-react';
 import { soundEngine } from '../game/SoundEngine.js';
 import { GRAPHICS_PRESETS, getEffectiveGraphicsSettings } from '../game/GraphicsSettings.js';
@@ -565,6 +567,27 @@ export default function SettingsModal({
                 )}
               </div>
 
+              <button
+                type="button"
+                className={`android-mode-button ${graphicsSettings?.preset === 'android' ? 'active' : ''}`}
+                onClick={() => onSetGraphicsPreset?.(graphicsSettings?.preset === 'android' ? 'balanced' : 'android')}
+                aria-pressed={graphicsSettings?.preset === 'android'}
+              >
+                <span className="android-mode-icon"><Smartphone size={20} /></span>
+                <span className="android-mode-copy">
+                  <strong>
+                    {graphicsSettings?.preset === 'android' ? 'MODE ANDROID AKTIF' : 'AKTIFKAN MODE ANDROID'}
+                  </strong>
+                  <small>
+                    Satu tombol untuk HP/tablet: frame lebih stabil &amp; tidak lag, tapi gambar tetap tajam dan semua
+                    objek (kota, warga, tulisan petak) tetap terlihat jelas. Tekan sekali lagi untuk kembali Seimbang.
+                  </small>
+                </span>
+                <span className="android-mode-state">
+                  {graphicsSettings?.preset === 'android' ? <><Zap size={13} /> ON</> : 'OFF'}
+                </span>
+              </button>
+
               <div className="graphics-preset-grid">
                 {Object.entries(GRAPHICS_PRESETS).map(([key, profile]) => (
                   <button
@@ -575,7 +598,15 @@ export default function SettingsModal({
                     aria-pressed={graphicsSettings?.preset === key}
                   >
                     <span className="graphics-preset-icon">
-                      {key === 'low' ? <Gauge size={19} /> : key === 'high' ? <Sparkles size={19} /> : <Monitor size={19} />}
+                      {key === 'low' ? (
+                        <Gauge size={19} />
+                      ) : key === 'high' ? (
+                        <Sparkles size={19} />
+                      ) : key === 'android' ? (
+                        <Smartphone size={19} />
+                      ) : (
+                        <Monitor size={19} />
+                      )}
                     </span>
                     <span className="graphics-preset-name">{profile.label}</span>
                     <span className="graphics-preset-desc">{profile.description}</span>

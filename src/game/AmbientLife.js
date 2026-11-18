@@ -110,17 +110,77 @@ const ROLE_HOURS = {
   tukangsayur: [4.5, 11],
   tukangbangunan: [7, 17],
   penjualkoran: [5.5, 17],
-  pengamen: [9, 25],
+  pengamen: [9, 25.5],
   fotografer: [8, 21],
   pasangan: [17, 23],
-  polisi: [5, 24],
-  ojol: [5, 24],
+  polisi: [5, 28], // patroli sampai dini hari
+  ojol: [5, 27], // ojol masih beroperasi lewat tengah malam
   satpam: [17, 31], // shift malam
   ibu: [6, 21],
   warga: [5.5, 23.5],
   tukangparkir: [6, 22],
   nenek: [6, 18],
+  remaja: [15, 24.5], // anak muda nongkrong sore–malam
+  pembelikuliner: [16, 26.5], // pemburu kuliner malam
 };
+
+/* ================= WARGA BERBEDA TIAP WAKTU (pagi/siang/sore/malam) =======
+   Komposisi orang di jalan berubah mengikuti jam: pagi sekolah & jogging,
+   siang pekerja/kurir, sore keluarga & pemburu kuliner, malam satpam, ojol
+   dan anak muda. Bobot menentukan siapa yang paling sering muncul. */
+export const PERIODS = {
+  pagi: {
+    key: 'pagi',
+    label: 'Pagi',
+    from: 4.5,
+    to: 10,
+    walkerScale: 1,
+    roles: { anaksekolah: 4, jogging: 3, tukangsayur: 2, penjualkoran: 2, petugas: 2, ibu: 2, warga: 2, pedagang: 2, tukangpos: 1, ojol: 1, kurir: 1, nenek: 1 },
+  },
+  siang: {
+    key: 'siang',
+    label: 'Siang',
+    from: 10,
+    to: 15.5,
+    walkerScale: 1.15,
+    roles: { ibu: 3, kurir: 3, tukangbangunan: 3, nenek: 2, pedagang: 2, tukangparkir: 2, warga: 2, ojol: 2, anaksekolah: 2, tukangpos: 2, fotografer: 1, polisi: 1 },
+  },
+  sore: {
+    key: 'sore',
+    label: 'Sore',
+    from: 15.5,
+    to: 18.5,
+    walkerScale: 1.3,
+    roles: { pembelikuliner: 3, remaja: 3, anak: 3, pasangan: 3, warga: 2, ibu: 2, ojol: 2, pengamen: 2, pedagang: 2, fotografer: 2, tukangparkir: 1, polisi: 1 },
+  },
+  malam: {
+    key: 'malam',
+    label: 'Malam',
+    from: 18.5,
+    to: 24,
+    walkerScale: 0.85,
+    roles: { pembelikuliner: 3, remaja: 3, pasangan: 2, satpam: 3, ojol: 2, pengamen: 2, polisi: 1, pedagang: 1, warga: 1 },
+  },
+  dini: {
+    key: 'dini',
+    label: 'Dini Hari',
+    from: 0,
+    to: 4.5,
+    walkerScale: 0.45,
+    roles: { satpam: 4, ojol: 2, polisi: 1, petugas: 1, pembelikuliner: 1 },
+  },
+};
+
+/** Warga seperti apa yang ada di jalan pada jam ini. */
+export function periodForHour(hour) {
+  const h = ((hour % 24) + 24) % 24;
+  for (const period of Object.values(PERIODS)) {
+    if (period.from <= period.to ? h >= period.from && h < period.to : h >= period.from || h < period.to) {
+      return period;
+    }
+  }
+  return PERIODS.siang;
+}
 
 /** Is `hour` inside a [open, close) window? Windows may run past midnight,
     either by closing at a number > 24 (e.g. satpam 17 → 31 = 07 pagi) or by
@@ -217,6 +277,7 @@ export class AmbientLife {
     this.moodDwell = between(this.rng, 26, 44);
     // Jam kota: mulai pagi, satu hari penuh dalam DAY_SECONDS detik nyata.
     this.hour = DAY_START_HOUR;
+    this.periodKey = periodForHour(DAY_START_HOUR).key;
     this.dayLength = DAY_SECONDS;
     this.hourTick = -1;
     this.lights = { x: 'green', z: 'red' };
@@ -489,9 +550,11 @@ export class AmbientLife {
     // Naikkan versi props supaya Scene3D bisa menyegarkan pembersihan kanopi.
     this.propsVersion = (this.propsVersion || 0) + 1;
     const q = this.quality;
+    const period = periodForHour(this.hour);
     const budget = {
       vehicles: Math.max(2, Math.round(this.currentLevel.vehicles * q)),
-      walkers: Math.max(3, Math.round(this.currentLevel.walkers * q)),
+      // jam kota ikut menentukan keramaian: sore paling ramai, dini hari sepi
+      walkers: Math.max(3, Math.round(this.currentLevel.walkers * q * period.walkerScale)),
       stalls: Math.max(1, Math.round(this.currentLevel.stalls * q)),
     };
     this.budget = budget;
@@ -511,8 +574,28 @@ export class AmbientLife {
     // clock decides which professions are working. We count the on-duty people
     // first and then take as many as the budget allows, so the pavement is never
     // left empty just because the working shift sits late in the roster.
-    const onDuty = this.walkers.filter((w) => w.scheduleOpen !== false);
-    const allow = new Set(onDuty.slice(0, budget.walkers));
+    const onDuty = this.walkers
+      .filter((w) => w.scheduleOpen !== false)
+      // Profesi yang khas untuk jam ini diprioritaskan (undian berbobot), jadi
+      // pagi terlihat anak sekolah & jogging, malam terlihat satpam & anak muda.
+      .sort((a, b) => (b.periodPriority ?? 0.5) - (a.periodPriority ?? 0.5));
+    // Ambil bergiliran supaya profesi tidak menumpuk: maksimal 2 orang dengan
+    // profesi sama, sisa slot baru diisi ulang bila masih kurang.
+    const allow = new Set();
+    const perRole = new Map();
+    for (const w of onDuty) {
+      if (allow.size >= budget.walkers) break;
+      const used = perRole.get(w.role) || 0;
+      if (used >= 2) continue;
+      perRole.set(w.role, used + 1);
+      allow.add(w);
+    }
+    if (allow.size < budget.walkers) {
+      for (const w of onDuty) {
+        if (allow.size >= budget.walkers) break;
+        allow.add(w);
+      }
+    }
     this.walkers.forEach((w) => {
       w.targetScale = allow.has(w) ? 1 : 0;
     });
@@ -564,7 +647,7 @@ export class AmbientLife {
   setHour(hour) {
     this.hour = ((hour % 24) + 24) % 24;
     this.hourTick = -1;
-    this.applySchedule();
+    this.applySchedule(true);
   }
 
   /** Label waktu untuk UI ("Pagi", "Siang", …). */
@@ -579,8 +662,61 @@ export class AmbientLife {
   }
 
   /** Recompute which stalls / vendors / street activities are "in season". */
-  applySchedule() {
+  /** Warga berganti sesuai waktu: pagi anak sekolah & jogging, siang pekerja
+      dan kurir, sore keluarga & pemburu kuliner, malam satpam/ojol/anak muda.
+      Hanya warga yang sedang tidak terlihat yang diganti, jadi tidak ada orang
+      yang berubah wujud di depan mata. */
+  refreshPeriodCrowd(hour, force = false) {
+    const period = periodForHour(hour);
+    const changedPeriod = period.key !== this.periodKey;
+    this.periodKey = period.key;
+    const entries = Object.entries(period.roles);
+    const total = entries.reduce((sum, [, weight]) => sum + weight, 0);
+    const pickRole = () => {
+      let roll = this.rng() * total;
+      for (const [role, weight] of entries) {
+        roll -= weight;
+        if (roll <= 0) return role;
+      }
+      return entries[0][0];
+    };
+    let swaps = 0;
+    const limit = force ? 24 : changedPeriod ? 6 : 2;
+    for (const w of this.walkers) {
+      if (swaps >= limit) break;
+      if (w.targetScale > 0.02 || w.scale > 0.06) continue; // sedang terlihat
+      if (w.periodKey === period.key && willOpen(ROLE_HOURS, w.role, hour)) continue;
+      const role = pickRole();
+      if (role !== w.role) this.rebuildWalkerRole(w, role);
+      w.periodKey = period.key;
+      swaps += 1;
+    }
+    // Undian berbobot: profesi yang khas jam ini dapat peluang tampil lebih besar.
+    for (const w of this.walkers) {
+      const weight = period.roles[w.role] ?? 0.3;
+      if (w.priorityPeriod !== period.key || w.priorityRole !== w.role) {
+        w.periodPriority = this.rng() * weight;
+        w.priorityPeriod = period.key;
+        w.priorityRole = w.role;
+      }
+    }
+  }
+
+  /** Ganti model seorang warga tanpa memindahkannya (geometri & material
+      dipakai bersama lewat cache, jadi cukup lepas anak-anak lamanya). */
+  rebuildWalkerRole(walker, role) {
+    const group = walker.group;
+    for (const child of [...group.children]) group.remove(child);
+    const person = this.buildPerson(role, this.rng);
+    for (const child of [...person.group.children]) group.add(child);
+    walker.legs = person.legs;
+    walker.role = role;
+    walker.baseScale = person.scale;
+  }
+
+  applySchedule(force = false) {
     const h = this.hour;
+    this.refreshPeriodCrowd(h, force);
     for (const s of this.stalls) {
       s.scheduleOpen = s.permanent ? true : willOpen(STALL_HOURS, s.kind, h);
       if (s.sign) s.sign.visible = s.scheduleOpen;
@@ -1488,6 +1624,8 @@ export class AmbientLife {
       'tukangpos',
       'tukangsayur',
       'anaksekolah',
+      'remaja',
+      'pembelikuliner',
     ];
     // Shuffle the pool with the match seed, then keep only part of it, so every
     // match shows its own mix of professions (some appear twice, others not at
@@ -1700,6 +1838,15 @@ export class AmbientLife {
         pants = '#1d4ed8';
         scale = 0.76;
         break;
+      case 'remaja':
+        shirt = pick(rand, ['#6366f1', '#0ea5e9', '#334155', '#a855f7']);
+        pants = '#1e293b';
+        scale = 0.9;
+        break;
+      case 'pembelikuliner':
+        shirt = pick(rand, ['#f97316', '#e11d48', '#f8fafc', '#14b8a6']);
+        pants = '#334155';
+        break;
       default:
         break;
     }
@@ -1805,6 +1952,18 @@ export class AmbientLife {
         // school uniform with a backpack
         this.box(g, '#dc2626', 0.3, 0.3, 0.18, -0.24, 0.9, 0);
         this.box(g, '#1d4ed8', 0.3, 0.12, 0.2, 0.02, 1.24, 0.1);
+        break;
+      case 'remaja':
+        // hoodie with the hood down, cap and a phone in hand
+        this.box(g, '#0f172a', 0.3, 0.16, 0.24, 0, 1.32, 0);
+        this.box(g, '#f8fafc', 0.1, 0.1, 0.1, 0, 1.24, 0.14);
+        this.box(g, '#111827', 0.09, 0.16, 0.03, 0.22, 0.86, 0.06);
+        break;
+      case 'pembelikuliner':
+        // dua bungkus kuliner dibawa pulang
+        this.box(g, '#f8fafc', 0.24, 0.2, 0.18, 0.24, 0.7, 0.06);
+        this.box(g, '#dc2626', 0.22, 0.05, 0.16, 0.24, 0.82, 0.06);
+        armL.rotation.z = 0.45;
         break;
       default:
         break;

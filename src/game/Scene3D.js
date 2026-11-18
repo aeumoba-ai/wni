@@ -2102,9 +2102,13 @@ export class Scene3D {
     this.applyPixelVisualStyle();
     this.updateRenderResolution();
     this.renderer.shadowMap.enabled = Boolean(this.graphics.shadows);
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = this.graphics.mobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     if (this.sunLight) {
-      const shadowSize = this.isCompactViewport
+      const shadowSize = this.graphics.mobile
+        ? this.isCompactViewport
+          ? 1024
+          : 1536
+        : this.isCompactViewport
         ? this.graphics.preset === 'high'
           ? 1536
           : 1024
@@ -2120,6 +2124,7 @@ export class Scene3D {
       }
       this.sunLight.shadow.needsUpdate = true;
     }
+    this.applyMobileMode();
 
     // Rebuild owned upgrade structures when the user changes building height/detail.
     const structuresChanged =
@@ -2265,9 +2270,55 @@ export class Scene3D {
       const cap = this.isCompactViewport ? 0.85 : 1.0;
       this.renderer.setPixelRatio(Math.max(0.4, Math.min(qualityRatio * 0.55, cap)));
     } else {
-      const cap = this.isCompactViewport ? 1.35 : 1.8;
-      this.renderer.setPixelRatio(Math.max(0.65, Math.min(qualityRatio, cap)));
+      // Mode Android: piksel tetap tajam di layar HP (dpr 2-3 tidak berguna),
+      // jadi cukup 1.35× perangkat dengan lantai 0.9 supaya teks tetap jelas.
+      const cap = this.graphics?.mobile ? 1.35 : this.isCompactViewport ? 1.35 : 1.8;
+      const floor = this.graphics?.mobile ? 0.9 : 0.65;
+      this.renderer.setPixelRatio(Math.max(floor, Math.min(qualityRatio, cap)) * (this.dynamicScale || 1));
     }
+    this.basePixelRatio = this.renderer.getPixelRatio();
+  }
+
+  /** Mode hemat khusus HP/Android: pemangkasan biaya render yang tidak
+      mengubah tampilan (bayangan diperbarui lebih jarang, lampu titik mati,
+      resolusi adaptif mengikuti FPS). Kualitas & ketajaman tetap. */
+  applyMobileMode() {
+    const mobile = Boolean(this.graphics?.mobile);
+    this.mobileMode = mobile;
+    this.dynamicScale = 1;
+    // lampu titik mahal di GPU HP → matikan, halo & genangan cahaya tetap ada
+    for (const lamp of this.parkLamps || []) {
+      if (lamp.light) lamp.light.visible = !mobile;
+    }
+    // bayangan: cukup diperbarui 15×/detik (adegan hampir statis)
+    this.shadowFrameSkip = mobile ? 4 : 0;
+    this.shadowFrame = 0;
+    if (this.renderer) {
+      this.renderer.shadowMap.autoUpdate = !mobile;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
+    if (this.sunLight?.shadow) {
+      this.sunLight.shadow.autoUpdate = !mobile;
+      this.sunLight.shadow.needsUpdate = true;
+    }
+    this.updateRenderResolution();
+  }
+
+  /** Resolusi adaptif: kalau HP mulai berat, buffer diturunkan sedikit
+      (maksimal 25%) lalu dinaikkan lagi begitu FPS kembali normal. */
+  updateAdaptiveResolution(dt) {
+    if (!this.mobileMode || !this.renderer) return;
+    this._fpsSamples = (this._fpsSamples || 0) + 1;
+    this._fpsTime = (this._fpsTime || 0) + dt;
+    this._fpsAccum = (this._fpsAccum || 0) + dt;
+    if (this._fpsTime < 1.2) return;
+    const fps = this._fpsSamples / this._fpsTime;
+    this._fpsSamples = 0;
+    this._fpsTime = 0;
+    const prev = this.dynamicScale;
+    if (fps < 46) this.dynamicScale = Math.max(0.75, this.dynamicScale - 0.06);
+    else if (fps > 57) this.dynamicScale = Math.min(1, this.dynamicScale + 0.04);
+    if (Math.abs(prev - this.dynamicScale) > 0.001) this.updateRenderResolution();
   }
 
   setSmoothAnimation(enabled) {
@@ -2939,6 +2990,14 @@ export class Scene3D {
     const dt = Math.min(0.05, this.clock.getDelta());
     const elapsed = this.clock.elapsedTime;
     const now = performance.now();
+
+    if (this.mobileMode) {
+      this.shadowFrame = (this.shadowFrame || 0) + 1;
+      if (this.shadowFrameSkip && this.shadowFrame % this.shadowFrameSkip === 0) {
+        this.renderer.shadowMap.needsUpdate = true;
+      }
+      this.updateAdaptiveResolution(dt);
+    }
 
     if (this.ambient) {
       this.ambient.update(dt);

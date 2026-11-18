@@ -28,6 +28,19 @@ export const GRAPHICS_PRESETS = {
     buildingHeight: 1.48,
     detail: 1.5,
   },
+  // Mode khusus HP/Android: semua objek & ketajaman tetap seperti biasa, tapi
+  // biaya render dipangkas (resolusi adaptif, bayangan lebih ringan, tanpa
+  // lampu titik, kota sedikit lebih tenang) supaya frame tetap stabil.
+  android: {
+    label: 'ANDROID',
+    description: 'Khusus HP/tablet: tetap tajam & semua terlihat jelas, frame stabil tanpa lag.',
+    resolution: 1,
+    shadows: true,
+    effects: 0.9,
+    buildingHeight: 1.12,
+    detail: 0.95,
+    mobile: true,
+  },
 };
 
 export const DEFAULT_GRAPHICS_SETTINGS = Object.freeze({
@@ -48,7 +61,7 @@ const clamp = (value, min, max, fallback) => {
 };
 
 export function normalizeGraphicsSettings(value) {
-  const preset = ['low', 'balanced', 'high', 'custom'].includes(value?.preset)
+  const preset = ['low', 'balanced', 'high', 'android', 'custom'].includes(value?.preset)
     ? value.preset
     : DEFAULT_GRAPHICS_SETTINGS.preset;
   const custom = value?.custom || {};
@@ -72,6 +85,7 @@ export function getEffectiveGraphicsSettings(value) {
     ...selected,
     visualStyle: normalized.visualStyle,
     preset: normalized.preset,
+    mobile: Boolean(selected.mobile),
     label: normalized.preset === 'custom' ? 'KUSTOM' : GRAPHICS_PRESETS[normalized.preset].label,
   };
 }
