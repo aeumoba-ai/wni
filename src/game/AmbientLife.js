@@ -346,6 +346,7 @@ export class AmbientLife {
     this.buildTrafficLights();
     this.buildStreetFurniture();
     this.buildBillboards();
+    this.buildLandmarksAndPlayground();
     this.buildStalls();
     this.buildLanesAndVehicles();
     this.buildWalkers();
@@ -647,6 +648,104 @@ export class AmbientLife {
     }
   }
 
+  /** Pos ronda, tugu kampung, gapura gang, ayunan taman, papan nama gang… */
+  buildLandmarksAndPlayground() {
+    const g = this.group;
+    const rand = this.rng;
+
+    // 1. Pos ronda (neighbourhood watch hut) with a warm lamp inside
+    for (const [sx, sz] of [[-1, 1], [1, -1]]) {
+      const pos = new THREE.Group();
+      this.box(pos, '#a16207', 1.7, 0.12, 1.7, 0, 0.06, 0); // raised wooden floor
+      for (const px of [-0.75, 0.75]) {
+        for (const pz of [-0.75, 0.75]) {
+          this.box(pos, '#78350f', 0.12, 2.45, 0.12, px, 1.23, pz); // corner posts
+        }
+      }
+      this.box(pos, '#7c2d12', 1.7, 1.5, 0.1, 0, 0.82, -0.8); // back wall
+      this.box(pos, '#7c2d12', 0.1, 1.5, 1.5, -0.8, 0.82, 0); // side wall
+      this.box(pos, '#fef3c7', 0.7, 0.5, 0.05, 0.1, 1.15, -0.74); // poster
+      this.box(pos, '#78350f', 1.74, 0.1, 1.74, 0, 2.42, 0); // roof underside
+      this.box(pos, '#92400e', 1.92, 0.12, 1.92, 0, 2.52, 0, { rotY: 0.06 }); // roof
+      this.box(pos, '#fbbf24', 0.2, 0.2, 0.2, 0.3, 2.2, 0, { emissive: '#fbbf24', emissiveIntensity: 0.8 });
+      this.box(pos, '#57534e', 0.9, 0.16, 0.36, -0.1, 0.5, 0.15); // bench inside
+      this.box(pos, '#dc2626', 0.5, 0.3, 0.05, 0, 1.6, 0.8); // signboard
+      g.add(pos);
+      this.placeProp(pos, sx * 25.5, sz * 17, 1.3, 2.62);
+    }
+
+    // 2. Tugu kampung (small neighbourhood monument)
+    const tugu = new THREE.Group();
+    this.box(tugu, '#e5e7eb', 1.5, 0.5, 1.5, 0, 0.25, 0);
+    this.box(tugu, '#d1d5db', 1.0, 0.4, 1.0, 0, 0.7, 0);
+    this.cylinder(tugu, '#f3f4f6', 0.28, 2.6, 0, 2.2, 0, { round: true });
+    this.sphere(tugu, '#eab308', 0.24, 0, 3.6, 0, { lowPoly: true });
+    g.add(tugu);
+    this.placeProp(tugu, -18.5, -25.2, 1.0, 3.9);
+
+    // 3. Gapura gang (neighbourhood gate) — two posts + banner across
+    const gate = new THREE.Group();
+    for (const px of [-1.6, 1.6]) {
+      this.box(gate, '#f8fafc', 0.26, 2.9, 0.26, px, 1.45, 0);
+      this.box(gate, '#dc2626', 0.34, 0.2, 0.34, px, 2.9, 0);
+    }
+    this.box(gate, '#dc2626', 3.5, 0.5, 0.16, 0, 2.55, 0);
+    this.box(gate, '#f8fafc', 2.4, 0.14, 0.18, 0, 2.32, 0);
+    g.add(gate);
+    this.placeProp(gate, 21.5, 25.2, 1.0, 3.1, { faceBoard: false });
+
+    // 4. Papan nama gang / RT sign
+    for (const [sx, sz] of [[-1, -1], [1, 1]]) {
+      const board = new THREE.Group();
+      this.cylinder(board, '#94a3b8', 0.06, 2.4, 0, 1.2, 0);
+      this.box(board, '#065f46', 1.5, 0.5, 0.06, 0, 2.2, 0);
+      this.box(board, '#f8fafc', 1.2, 0.1, 0.08, 0, 2.06, 0);
+      g.add(board);
+      this.placeProp(board, sx * 27.5, sz * 24.5, 0.9, 2.5, { faceBoard: false, physR: 0.5 });
+    }
+
+    // 5. Playground: small swing set + slide in the park corner
+    const play = new THREE.Group();
+    for (const px of [-1.1, 1.1]) this.box(play, '#0ea5e9', 0.12, 1.9, 0.12, px, 0.95, 0, { rotZ: px > 0 ? -0.12 : 0.12 });
+    this.box(play, '#0ea5e9', 2.4, 0.14, 0.14, 0, 1.9, 0);
+    for (const px of [-0.45, 0.45]) {
+      this.box(play, '#64748b', 0.03, 0.7, 0.03, px, 1.5, 0);
+      this.box(play, '#facc15', 0.34, 0.06, 0.22, px, 1.12, 0);
+    }
+    this.box(play, '#22c55e', 0.9, 0.1, 0.5, 2.0, 0.9, 0, { rotZ: -0.45 });
+    this.box(play, '#16a34a', 0.9, 0.1, 0.5, 2.0, 0.55, 0, { rotZ: -0.9 });
+    g.add(play);
+    this.placeProp(play, -24.5, 17.5, 2.0, 2.1);
+
+    // 6. Small fish pond / taman bunga at the other corner
+    const pond = new THREE.Group();
+    this.cylinder(pond, '#1d4ed8', 1.5, 0.12, 0, 0.06, 0, { round: true });
+    this.cylinder(pond, '#93c5fd', 1.15, 0.1, 0, 0.1, 0, { round: true, transparent: true, opacity: 0.85 });
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      this.box(pond, '#9ca3af', 0.5, 0.24, 0.4, Math.cos(a) * 1.55, 0.12, Math.sin(a) * 1.55, { rotY: -a });
+      this.sphere(pond, pick(rand, ['#f472b6', '#fbbf24', '#f87171']), 0.1, Math.cos(a) * 1.55, 0.3, Math.sin(a) * 1.55, { noShadow: true });
+    }
+    g.add(pond);
+    this.placeProp(pond, 24.5, -17.5, 2.1, 0.5);
+
+    // 7. Overhead banner strings across the park footpath corners ("17-an" style)
+    for (const [sx, sz] of [[-1, 1], [1, -1]]) {
+      const bunting = new THREE.Group();
+      this.cylinder(bunting, '#94a3b8', 0.05, 2.6, -1.6, 1.3, 0, { noShadow: true });
+      this.cylinder(bunting, '#94a3b8', 0.05, 2.6, 1.6, 1.3, 0, { noShadow: true });
+      for (let i = 0; i < 7; i++) {
+        const flag = new THREE.Mesh(this.geo.box, this.mat(i % 2 ? '#ef4444' : '#f8fafc', { roughness: 0.6 }));
+        flag.scale.set(0.28, 0.34, 0.03);
+        flag.position.set(-1.4 + i * 0.46, 2.45 - Math.sin((i / 6) * Math.PI) * 0.18, 0);
+        bunting.add(flag);
+        this.addAnim('flag', flag, { phase: i * 0.5, speed: 2.2 });
+      }
+      g.add(bunting);
+      this.placeProp(bunting, sx * 25.5, sz * 25.5, 1.8, 2.7, { faceBoard: false, physR: 1.2 });
+    }
+  }
+
   buildBillboards() {
     const rand = this.rng;
     const ads = [
@@ -654,15 +753,31 @@ export class AmbientLife {
       { lines: ['ES KELAPA'], bg: '#0f766e', fg: '#ecfeff', sub: 'SEGAR ALAMI' },
       { lines: ['BATIK'], bg: '#7c2d12', fg: '#fde68a', sub: 'NUSANTARA' },
       { lines: ['KOPI TUBRUK'], bg: '#422006', fg: '#fbbf24', sub: 'SETIAP HARI' },
+      { lines: ['BAKSO PAK KUMIS'], bg: '#1e3a8a', fg: '#fef9c3', sub: 'SEJAK 1987' },
+      { lines: ['SERVIS MOTOR'], bg: '#111827', fg: '#f8fafc', sub: 'BUKA 07.00' },
+      { lines: ['LAUNDRY KILOAN'], bg: '#0ea5e9', fg: '#f0f9ff', sub: '2 HARI JADI' },
+      { lines: ['LES BAHASA'], bg: '#7c3aed', fg: '#f5f3ff', sub: 'DAFTAR SEKARANG' },
+      { lines: ['CAT TEMBOK'], bg: '#c2410c', fg: '#fff7ed', sub: 'SEMUA WARNA' },
+      { lines: ['KUE BASAH'], bg: '#be123c', fg: '#ffe4e6', sub: 'PESAN HARI INI' },
     ];
-    const spots = [
+    // 2–4 billboards per match, placed on the map corners and never overlapping.
+    const spotPool = [
       [-52, 36.5, 0],
       [52, -36.5, Math.PI],
       [-36.5, -52, Math.PI / 2],
+      [36.5, 52, -Math.PI / 2],
+      [-56, -36.5, 0],
+      [56, 36.5, Math.PI],
     ];
+    const shuffledSpots = spotPool
+      .map((spot) => ({ spot, order: rand() }))
+      .sort((a, b) => a.order - b.order)
+      .map((entry) => entry.spot);
+    const spots = shuffledSpots.slice(0, 2 + Math.floor(rand() * 3));
+    const adBag = ads.map((ad) => ({ ad, order: rand() })).sort((a, b) => a.order - b.order).map((entry) => entry.ad);
     for (let i = 0; i < spots.length; i++) {
       const [bx, bz, ry] = spots[i];
-      const ad = ads[Math.floor(rand() * ads.length) % ads.length];
+      const ad = adBag[i % adBag.length];
       const group = new THREE.Group();
       this.box(group, '#475569', 0.28, 7.2, 0.28, -2.4, 3.6, 0);
       this.box(group, '#475569', 0.28, 7.2, 0.28, 2.4, 3.6, 0);
@@ -746,13 +861,33 @@ export class AmbientLife {
   }
 
   rollVehicleKind(lane, rand, index) {
-    const options = ['motor', 'motor', 'ojol', 'sedan', 'angkot', 'bajaj', 'pickup', 'motor', 'becak', 'truk', 'bus'];
-    if (lane.lightAxis === null) return index % 3 === 0 ? 'bus' : index % 3 === 1 ? 'truk' : 'sedan';
-    return pick(rand, options);
+    // The slow "street life" vehicles live in the kerb lane, fast traffic in the
+    // inner lane, so the mix feels like a real Indonesian road.
+    const kerbLane = Math.abs(lane.coord) > ROAD_CENTER;
+    const slow = ['becak', 'delman', 'gerobak', 'sepeda', 'bajaj', 'angkot', 'martabak', 'tukangsayur'];
+    const fast = ['motor', 'ojol', 'vespa', 'sedan', 'elf', 'pickup', 'boxtruck', 'truk', 'bus', 'angkot'];
+    if (lane.lightAxis === null) return pick(rand, ['bus', 'truk', 'boxtruck', 'sedan', 'elf']);
+    return pick(rand, kerbLane && rand() < 0.5 ? slow : fast);
   }
 
   vehicleSpeed(kind) {
     switch (kind) {
+      case 'vespa':
+        return 11.2;
+      case 'elf':
+        return 9.6;
+      case 'boxtruck':
+        return 7.8;
+      case 'delman':
+        return 3.8;
+      case 'gerobak':
+        return 2.4;
+      case 'sepeda':
+        return 4.4;
+      case 'martabak':
+        return 3.4;
+      case 'tukangsayur':
+        return 3.0;
       case 'motor':
         return 13.5;
       case 'ojol':
@@ -771,6 +906,8 @@ export class AmbientLife {
         return 6.8;
       case 'becak':
         return 3.2;
+      case 'becakbarang':
+        return 2.6;
       default:
         return 9;
     }
@@ -795,6 +932,24 @@ export class AmbientLife {
         return { group: this.buildBus(color), length: 3.8 };
       case 'becak':
         return { group: this.buildBecak(), length: 2.1 };
+      case 'becakbarang':
+        return { group: this.buildBecak(true), length: 2.3 };
+      case 'delman':
+        return { group: this.buildDelman(), length: 5.2 };
+      case 'gerobak':
+        return { group: this.buildPushCart('sayur'), length: 2.2 };
+      case 'tukangsayur':
+        return { group: this.buildPushCart('keliling'), length: 2.2 };
+      case 'martabak':
+        return { group: this.buildPushCart('martabak'), length: 2.4 };
+      case 'sepeda':
+        return { group: this.buildBicycle(), length: 1.9 };
+      case 'vespa':
+        return { group: this.buildScooter(), length: 1.8 };
+      case 'elf':
+        return { group: this.buildElf(color), length: 3.4 };
+      case 'boxtruck':
+        return { group: this.buildBoxTruck(color), length: 3.6 };
       default:
         return { group: this.buildSedan(color), length: 2.3 };
     }
@@ -885,7 +1040,118 @@ export class AmbientLife {
     return g;
   }
 
-  buildBecak() {
+  buildDelman() {
+    const g = new THREE.Group();
+    // horse
+    const horse = new THREE.Group();
+    this.box(horse, '#8b5e34', 1.5, 0.62, 0.55, 0, 1.0, 0);
+    this.box(horse, '#7c5228', 0.42, 0.5, 0.44, 0.72, 1.36, 0, { rotZ: -0.35 });
+    this.box(horse, '#6b4423', 0.3, 0.3, 0.34, 0.95, 1.58, 0);
+    for (const wz of [-0.2, 0.2]) {
+      this.box(horse, '#6b4423', 0.12, 0.72, 0.12, 0.6, 0.36, wz);
+      this.box(horse, '#6b4423', 0.12, 0.72, 0.12, -0.55, 0.36, wz);
+    }
+    this.box(horse, '#4b2e14', 0.16, 0.5, 0.16, -0.78, 1.1, 0, { rotZ: 0.5 });
+    g.add(horse);
+    // cart
+    this.addWheels(g, [[0.2, 0.52], [0.2, -0.52]], 0.34, 0.1, '#5b4636');
+    this.box(g, '#b45309', 1.5, 0.18, 1.05, -0.85, 0.72, 0);
+    this.box(g, '#92400e', 1.5, 0.3, 0.1, -0.85, 0.9, 0.5);
+    this.box(g, '#92400e', 1.5, 0.3, 0.1, -0.85, 0.9, -0.5);
+    this.box(g, '#facc15', 1.7, 0.1, 1.15, -0.85, 1.95, 0);
+    for (const px of [-1.6, -0.1]) {
+      for (const pz of [-0.48, 0.48]) this.box(g, '#78350f', 0.07, 1.2, 0.07, px, 1.35, pz);
+    }
+    this.box(g, pick(this.rng, SHIRT_COLORS), 0.32, 0.44, 0.32, -0.5, 1.05, 0);
+    this.sphere(g, pick(this.rng, SKIN_TONES), 0.13, -0.5, 1.34, 0, { lowPoly: true });
+    this.box(g, '#eab308', 0.34, 0.12, 0.34, -0.5, 1.48, 0); // caping
+    return g;
+  }
+
+  buildPushCart(kind) {
+    const g = new THREE.Group();
+    // gerobak (cart body) + pushcart wheels
+    this.box(g, '#a16207', 1.35, 0.62, 0.85, -0.2, 0.62, 0);
+    this.box(g, '#f5f5f4', 1.38, 0.08, 0.88, -0.2, 0.95, 0);
+    for (const wz of [-0.44, 0.44]) this.cylinder(g, '#1f2937', 0.26, 0.12, -0.15, 0.26, wz, { rotX: Math.PI / 2 });
+    this.box(g, '#52525b', 0.06, 0.06, 0.62, 0.75, 0.72, 0);
+    if (kind === 'sayur') {
+      // vegetables piled on the cart
+      const veg = ['#16a34a', '#65a30d', '#f97316', '#dc2626', '#22d3ee'];
+      for (let i = 0; i < 8; i++) {
+        this.sphere(g, veg[i % veg.length], 0.13, -0.6 + (i % 4) * 0.34, 1.02 + (i > 3 ? 0.1 : 0), (i % 2 ? 0.18 : -0.18), { lowPoly: true, noShadow: true });
+      }
+    } else if (kind === 'martabak') {
+      this.box(g, '#e7e5e4', 0.9, 0.1, 0.7, -0.2, 1.02, 0); // griddle
+      this.cylinder(g, '#7c2d12', 0.22, 0.16, 0.3, 1.05, 0.2);
+      const ember = this.box(g, '#f97316', 0.5, 0.06, 0.5, -0.2, 0.99, 0, { emissive: '#f97316', emissiveIntensity: 0.7 });
+      this.addAnim('flicker', ember, { speed: 5 });
+      this.box(g, '#fbbf24', 1.4, 0.08, 0.9, -0.2, 2.0, 0); // canopy
+      for (const px of [-0.85, 0.45]) {
+        for (const pz of [-0.4, 0.4]) this.box(g, '#78716c', 0.06, 1.0, 0.06, px, 1.5, pz);
+      }
+    } else {
+      this.box(g, '#22c55e', 1.1, 0.3, 0.7, -0.2, 1.08, 0); // baskets of greens
+    }
+    // the vendor pushing it
+    this.box(g, pick(this.rng, SHIRT_COLORS), 0.3, 0.46, 0.3, 0.98, 0.95, 0);
+    this.sphere(g, pick(this.rng, SKIN_TONES), 0.13, 0.98, 1.24, 0, { lowPoly: true });
+    this.box(g, pick(this.rng, ['#0f172a', '#eab308', '#f8fafc']), 0.28, 0.14, 0.3, 0.98, 1.36, 0);
+    return g;
+  }
+
+  buildBicycle() {
+    const g = new THREE.Group();
+    this.addWheels(g, [[0.55, 0], [-0.55, 0]], 0.3, 0.06, '#1f2937');
+    this.box(g, '#38bdf8', 0.9, 0.06, 0.08, 0, 0.55, 0);
+    this.box(g, '#38bdf8', 0.07, 0.42, 0.07, 0.45, 0.72, 0, { rotZ: -0.2 });
+    this.box(g, '#334155', 0.05, 0.05, 0.42, 0.55, 0.95, 0);
+    this.box(g, '#1e293b', 0.3, 0.08, 0.24, -0.35, 0.72, 0);
+    this.box(g, pick(this.rng, SHIRT_COLORS), 0.3, 0.44, 0.3, -0.25, 1.0, 0);
+    this.sphere(g, pick(this.rng, SKIN_TONES), 0.13, -0.2, 1.3, 0, { lowPoly: true });
+    this.box(g, '#f8fafc', 0.26, 0.14, 0.28, -0.2, 1.42, 0);
+    return g;
+  }
+
+  buildScooter() {
+    const g = new THREE.Group();
+    const body = pick(this.rng, ['#f8fafc', '#0ea5e9', '#ef4444', '#a855f7', '#22c55e']);
+    this.addWheels(g, [[0.6, 0], [-0.55, 0]], 0.22, 0.12);
+    this.box(g, body, 0.95, 0.4, 0.36, -0.05, 0.5, 0); // vespa-ish body
+    this.box(g, body, 0.5, 0.3, 0.34, 0.35, 0.72, 0);
+    this.box(g, '#0f172a', 0.42, 0.1, 0.3, -0.3, 0.74, 0);
+    this.box(g, '#94a3b8', 0.05, 0.3, 0.05, 0.55, 0.9, 0);
+    this.box(g, '#94a3b8', 0.05, 0.05, 0.55, 0.58, 1.02, 0);
+    this.box(g, pick(this.rng, SHIRT_COLORS), 0.3, 0.44, 0.3, -0.15, 0.98, 0);
+    this.sphere(g, pick(this.rng, SKIN_TONES), 0.13, -0.1, 1.28, 0, { lowPoly: true });
+    this.box(g, '#f8fafc', 0.28, 0.2, 0.3, -0.1, 1.42, 0);
+    return g;
+  }
+
+  buildElf(color) {
+    const g = new THREE.Group();
+    this.addWheels(g, [[1.1, 0.5], [1.1, -0.5], [-1.1, 0.5], [-1.1, -0.5]], 0.27);
+    this.box(g, color, 3.1, 1.05, 1.0, 0, 0.92, 0);
+    this.box(g, '#e0f2fe', 2.6, 0.4, 1.02, -0.1, 1.18, 0);
+    this.box(g, '#f8fafc', 3.12, 0.16, 1.02, 0, 1.44, 0);
+    this.box(g, '#dbeafe', 0.5, 0.52, 0.98, 1.5, 1.02, 0);
+    this.box(g, '#0f172a', 0.06, 0.24, 0.8, 1.55, 1.2, 0);
+    this.box(g, '#1f2937', 0.9, 0.16, 0.98, -1.4, 0.64, 0);
+    return g;
+  }
+
+  buildBoxTruck(color) {
+    const g = new THREE.Group();
+    this.addWheels(g, [[1.2, 0.52], [1.2, -0.52], [-1.2, 0.52], [-1.2, -0.52]], 0.3);
+    this.box(g, color, 1.1, 0.9, 1.02, 1.15, 0.88, 0);
+    this.box(g, '#dbeafe', 0.66, 0.44, 0.96, 1.3, 1.24, 0);
+    this.box(g, '#f1f5f9', 2.5, 1.5, 1.12, -0.55, 1.3, 0); // box body
+    this.box(g, '#cbd5e1', 2.52, 0.1, 1.14, -0.55, 2.08, 0);
+    this.box(g, '#ef4444', 0.08, 0.34, 0.8, -1.78, 1.36, 0);
+    return g;
+  }
+
+  buildBecak(withCargo = false) {
     const g = new THREE.Group();
     const color = pick(this.rng, ['#dc2626', '#16a34a', '#2563eb']);
     this.addWheels(g, [[0.6, 0]], 0.24);
@@ -894,6 +1160,12 @@ export class AmbientLife {
     this.box(g, '#fef3c7', 0.75, 0.55, 0.8, -0.55, 0.95, 0);
     this.box(g, '#0f172a', 0.9, 0.08, 0.98, -0.5, 1.22, 0);
     this.box(g, '#334155', 0.5, 0.08, 0.1, 0.3, 0.95, 0);
+    if (withCargo) {
+      // becak barang: cardboard boxes & sacks piled on the passenger seat
+      this.box(g, '#c8a165', 0.7, 0.5, 0.7, -0.55, 1.28, 0);
+      this.box(g, '#a16207', 0.55, 0.36, 0.55, -0.5, 1.7, 0.1, { rotY: 0.4 });
+      this.box(g, '#78716c', 0.5, 0.24, 0.5, -0.62, 1.12, -0.28, { rotY: -0.3 });
+    }
     this.box(g, pick(this.rng, SHIRT_COLORS), 0.3, 0.45, 0.3, 0.5, 0.85, 0);
     this.sphere(g, pick(this.rng, SKIN_TONES), 0.13, 0.5, 1.14, 0, { lowPoly: true });
     return g;
@@ -956,7 +1228,7 @@ export class AmbientLife {
       if (other === self || !other.group.visible) continue;
       const dx = x - other.group.position.x;
       const dz = z - other.group.position.z;
-      const min = radius + 0.42;
+      const min = radius + 0.52;
       if (dx * dx + dz * dz < min * min) return true;
     }
     return false;
@@ -964,8 +1236,7 @@ export class AmbientLife {
 
   buildWalkers() {
     const rand = this.rng;
-    const maxWalkers = Math.max(8, Math.round(ACTIVITY_LEVELS.ramai.walkers * 1.35));
-    const roles = [
+    const baseRoles = [
       'warga',
       'ibu',
       'anak',
@@ -980,10 +1251,23 @@ export class AmbientLife {
       'tukangparkir',
       'pengamen',
       'penjualkoran',
-      'warga',
-      'ibu',
-      'anak',
+      'tukangbangunan',
+      'nenek',
+      'polisi',
+      'tukangpos',
+      'tukangsayur',
+      'anaksekolah',
     ];
+    // Shuffle the pool with the match seed, then keep only part of it, so every
+    // match shows its own mix of professions (some appear twice, others not at
+    // all) instead of the same full roster in an infinite loop.
+    for (let i = baseRoles.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [baseRoles[i], baseRoles[j]] = [baseRoles[j], baseRoles[i]];
+    }
+    const rosterCount = 11 + Math.floor(rand() * 5); // 11..15 professions per match
+    const roles = baseRoles.slice(0, Math.min(rosterCount, baseRoles.length));
+    const maxWalkers = Math.max(8, Math.round(ACTIVITY_LEVELS.ramai.walkers * 1.7));
     // Who strolls the park footpath and who walks along the shop fronts.
     const parkSlots = [];
     const pavementSlots = [];
@@ -1134,6 +1418,31 @@ export class AmbientLife {
       case 'penjualkoran':
         shirt = '#0ea5e9';
         break;
+      case 'tukangbangunan':
+        shirt = '#f59e0b';
+        pants = '#57534e';
+        break;
+      case 'nenek':
+        shirt = '#a78bfa';
+        pants = '#3f3f46';
+        scale = 0.92;
+        break;
+      case 'polisi':
+        shirt = '#1c4ed8';
+        pants = '#1e293b';
+        break;
+      case 'tukangpos':
+        shirt = '#f97316';
+        pants = '#1e3a8a';
+        break;
+      case 'tukangsayur':
+        shirt = '#65a30d';
+        break;
+      case 'anaksekolah':
+        shirt = '#f8fafc';
+        pants = '#1d4ed8';
+        scale = 0.76;
+        break;
       default:
         break;
     }
@@ -1202,6 +1511,44 @@ export class AmbientLife {
         this.box(g, '#f1f5f9', 0.34, 0.16, 0.24, 0.2, 0.98, 0);
         this.box(g, '#cbd5e1', 0.34, 0.04, 0.24, 0.2, 1.07, 0);
         break;
+      case 'tukangbangunan':
+        // yellow hard hat + a sack of cement on the shoulder
+        this.box(g, '#facc15', 0.34, 0.16, 0.34, 0, 1.34, 0);
+        this.box(g, '#e7e5e4', 0.3, 0.26, 0.24, -0.26, 1.12, 0);
+        armL.rotation.z = 0.5;
+        break;
+      case 'nenek':
+        // headscarf, walking stick, shopping bag
+        this.box(g, '#fdf2f8', 0.4, 0.24, 0.32, 0, 1.26, 0);
+        this.box(g, '#92400e', 0.05, 0.9, 0.05, 0.26, 0.48, 0.1);
+        this.box(g, '#dc2626', 0.22, 0.28, 0.16, -0.26, 0.55, 0.12);
+        break;
+      case 'polisi':
+        // traffic police: white cap, reflective vest, whistle arm up
+        this.box(g, '#f8fafc', 0.34, 0.12, 0.34, 0, 1.34, 0);
+        this.box(g, '#fef08a', 0.4, 0.28, 0.32, 0, 0.9, 0);
+        this.box(g, '#f8fafc', 0.09, 0.09, 0.09, 0.02, 1.3, 0.16);
+        armR.rotation.z = -1.15;
+        break;
+      case 'tukangpos':
+        // postal bag across the body
+        this.box(g, '#1d4ed8', 0.26, 0.36, 0.18, -0.24, 0.78, 0.06);
+        this.box(g, '#f8fafc', 0.3, 0.12, 0.22, 0.05, 1.0, 0.16);
+        break;
+      case 'tukangsayur':
+        // bamboo pikulan (shoulder pole) with two baskets
+        this.box(g, '#a16207', 0.06, 0.06, 1.5, 0.16, 1.28, 0);
+        this.box(g, '#78716c', 0.3, 0.24, 0.3, 0.16, 1.06, 0.68);
+        this.box(g, '#78716c', 0.3, 0.24, 0.3, 0.16, 1.06, -0.68);
+        this.sphere(g, '#16a34a', 0.18, 0.16, 1.18, 0.68, { lowPoly: true, noShadow: true });
+        this.sphere(g, '#65a30d', 0.18, 0.16, 1.18, -0.68, { lowPoly: true, noShadow: true });
+        armR.rotation.z = -1.4;
+        break;
+      case 'anaksekolah':
+        // school uniform with a backpack
+        this.box(g, '#dc2626', 0.3, 0.3, 0.18, -0.24, 0.9, 0);
+        this.box(g, '#1d4ed8', 0.3, 0.12, 0.2, 0.02, 1.24, 0.1);
+        break;
       default:
         break;
     }
@@ -1213,7 +1560,23 @@ export class AmbientLife {
 
   buildStalls() {
     const rand = this.rng;
-    const kinds = ['warung', 'bakso', 'gorengan', 'es', 'balon', 'sate', 'bensin', 'halte'];
+    const kinds = [
+      'warung',
+      'bakso',
+      'gorengan',
+      'es',
+      'balon',
+      'sate',
+      'bensin',
+      'halte',
+      'martabak',
+      'cilok',
+      'tahubulat',
+      'kelapa',
+      'jagung',
+      'siomay',
+      'tukangcendol',
+    ];
     const maxStalls = kinds.length; // every stall is pre-built, opened per mood
     // Anchored to match `kinds` order: kaki-lima around the park footpath,
     // and the halte on the shop-front pavement next to the asphalt.
@@ -1226,6 +1589,13 @@ export class AmbientLife {
       [-9, 24.6],
       [26.6, 21.5],
       [37.2, -20],
+      [-26.6, -21.5],
+      [21.5, -26.6],
+      [-21.5, 26.6],
+      [26.6, -21.5],
+      [-26.6, 21.5],
+      [20.5, 26.8],
+      [-20.5, -26.8],
     ];
     for (let i = 0; i < maxStalls; i++) {
       const kind = kinds[i % kinds.length];
@@ -1243,6 +1613,13 @@ export class AmbientLife {
         sate: 1.7,
         bensin: 1.1,
         halte: 2.3,
+        martabak: 1.7,
+        cilok: 1.1,
+        tahubulat: 1.2,
+        kelapa: 1.3,
+        jagung: 1.4,
+        siomay: 1.2,
+        tukangcendol: 1.3,
       };
       const foot = STALL_FOOTPRINT[kind] ?? 1.3;
       this.placeProp(group, ax, az, foot, 2.8, {
@@ -1341,6 +1718,91 @@ export class AmbientLife {
           this.cylinder(g, i % 2 ? '#f59e0b' : '#fbbf24', 0.11, 0.5, -0.55 + (i % 3) * 0.55, 1.05, (i > 2 ? 0.28 : -0.28));
         }
         this.box(g, '#f8fafc', 0.7, 0.4, 0.06, 0, 1.5, -0.2);
+        break;
+      }
+      case 'martabak': {
+        // martabak manis cart with a hot plate and striped canopy
+        this.box(g, '#a16207', 1.6, 0.7, 0.9, 0, 0.62, 0);
+        this.box(g, '#78716c', 1.5, 0.08, 0.8, 0, 1.02, 0);
+        this.cylinder(g, '#facc15', 0.16, 0.1, 0.5, 1.12, 0.2);
+        const ember = this.box(g, '#f97316', 0.9, 0.06, 0.5, -0.2, 1.04, 0, { emissive: '#f97316', emissiveIntensity: 0.7 });
+        this.addAnim('flicker', ember, { speed: 5 });
+        this.box(g, '#dc2626', 1.9, 0.1, 1.2, 0, 2.15, 0);
+        for (const px of [-0.8, 0.8]) {
+          for (const pz of [-0.5, 0.5]) this.box(g, '#78716c', 0.06, 1.15, 0.06, px, 1.58, pz);
+        }
+        const vendor = this.buildPerson('pedagang', rand).group;
+        vendor.position.set(-0.15, 0, 0.62);
+        vendor.rotation.y = Math.PI;
+        g.add(vendor);
+        break;
+      }
+      case 'cilok': {
+        this.box(g, '#0ea5e9', 1.1, 0.6, 0.7, 0, 0.62, 0);
+        this.box(g, '#e2e8f0', 1.16, 0.08, 0.76, 0, 0.96, 0);
+        for (let i = 0; i < 5; i++) {
+          this.sphere(g, i % 2 ? '#f8fafc' : '#fbbf24', 0.1, -0.3 + i * 0.15, 1.03, 0.12, { lowPoly: true, noShadow: true });
+        }
+        this.cylinder(g, '#b91c1c', 0.16, 0.24, 0.34, 1.08, -0.15);
+        break;
+      }
+      case 'tahubulat': {
+        // the classic tahu bulat drum cart
+        this.box(g, '#1f2937', 1.2, 0.55, 0.8, 0, 0.55, 0);
+        this.cylinder(g, '#f59e0b', 0.34, 0.5, 0.1, 1.05, 0, { round: true });
+        this.sphere(g, '#fde68a', 0.16, -0.3, 1.06, 0.2, { lowPoly: true, noShadow: true });
+        this.sphere(g, '#fde68a', 0.16, -0.3, 1.06, -0.2, { lowPoly: true, noShadow: true });
+        for (const wz of [-0.42, 0.42]) this.cylinder(g, '#111827', 0.22, 0.1, -0.3, 0.22, wz, { rotX: Math.PI / 2 });
+        break;
+      }
+      case 'kelapa': {
+        // es kelapa muda stand: young coconuts & a chopping block
+        this.box(g, '#166534', 1.2, 0.62, 0.8, 0, 0.6, 0);
+        for (let i = 0; i < 4; i++) {
+          this.sphere(g, '#15803d', 0.18, -0.35 + (i % 2) * 0.3, 1.02 + (i > 1 ? 0.24 : 0), i > 1 ? 0.18 : -0.18, { lowPoly: true });
+        }
+        this.cylinder(g, '#a3a3a3', 0.2, 0.1, 0.4, 1.03, 0.1);
+        this.cone(g, pick(rand, ['#22c55e', '#0ea5e9', '#ef4444']), 1.1, 0.4, 0, 2.1, 0);
+        const vendor = this.buildPerson('pedagang', rand).group;
+        vendor.position.set(-0.55, 0, 0.55);
+        vendor.rotation.y = Math.PI;
+        g.add(vendor);
+        break;
+      }
+      case 'jagung': {
+        // jagung bakar grill with glowing embers
+        this.box(g, '#7c2d12', 1.7, 0.55, 0.8, 0, 0.55, 0);
+        const ember = this.box(g, '#f97316', 1.3, 0.08, 0.5, 0, 0.88, 0, { emissive: '#f97316', emissiveIntensity: 0.85 });
+        this.addAnim('flicker', ember, { speed: 7 });
+        for (let i = 0; i < 4; i++) {
+          this.box(g, '#facc15', 0.5, 0.08, 0.12, -0.5 + i * 0.34, 0.95, 0, { rotY: 0.1 * i });
+        }
+        for (let i = 0; i < 3; i++) {
+          const smoke = this.sphere(g, '#e2e8f0', 0.16, 0, 1.1 + i * 0.24, 0, { noShadow: true, transparent: true, opacity: 0.4 });
+          this.addAnim('puff', smoke, { baseY: smoke.position.y, phase: i * 0.8, speed: 0.9 });
+        }
+        break;
+      }
+      case 'siomay': {
+        this.box(g, '#b91c1c', 1.1, 0.62, 0.8, 0, 0.6, 0);
+        this.box(g, '#f8fafc', 1.16, 0.08, 0.86, 0, 0.98, 0);
+        for (let i = 0; i < 3; i++) {
+          this.cylinder(g, '#fef3c7', 0.2, 0.1, -0.3 + i * 0.3, 1.05, 0, { round: true });
+          this.sphere(g, '#fde68a', 0.09, -0.3 + i * 0.3, 1.12, 0, { lowPoly: true, noShadow: true });
+        }
+        this.cylinder(g, '#7c2d12', 0.14, 0.2, 0.42, 1.06, -0.2);
+        const steam = this.sphere(g, '#f1f5f9', 0.14, 0, 1.34, 0, { noShadow: true, transparent: true, opacity: 0.45 });
+        this.addAnim('puff', steam, { baseY: steam.position.y, phase: 0.3, speed: 0.7 });
+        break;
+      }
+      case 'tukangcendol': {
+        // cendol cart with a big glass jar & hanging sign
+        this.box(g, '#0f766e', 1.2, 0.66, 0.85, 0, 0.62, 0);
+        this.cylinder(g, '#e0f2fe', 0.28, 0.5, 0.25, 1.12, 0, { round: true });
+        this.cylinder(g, '#a3e635', 0.22, 0.3, 0.25, 1.02, 0, { round: true });
+        this.box(g, '#f8fafc', 0.8, 0.3, 0.06, 0, 1.75, 0);
+        this.cylinder(g, '#78716c', 0.04, 0.7, -0.4, 1.6, -0.3);
+        this.cylinder(g, '#78716c', 0.04, 0.7, 0.4, 1.6, -0.3);
         break;
       }
       case 'halte':
@@ -1547,6 +2009,44 @@ export class AmbientLife {
       }
 
       if (w.pause <= 0 && this.rng() < 0.0009) w.pause = between(this.rng, 1.4, 3.6);
+    }
+
+    // ---- keep pedestrians a shoulder apart -------------------------------
+    // Walkers that meet head-on on the same stretch can drift into each other
+    // even with the look-ahead check (both dodge the same way). Nudge them
+    // apart along the width of their path instead of letting them clip.
+    const MIN_WALK_SEP = 0.78;
+    for (let i = 0; i < this.walkers.length; i++) {
+      const a = this.walkers[i];
+      if (!a.group.visible) continue;
+      for (let j = i + 1; j < this.walkers.length; j++) {
+        const b = this.walkers[j];
+        if (!b.group.visible || a.half !== b.half || Boolean(a.patrol) !== Boolean(b.patrol)) continue;
+        const ax = a.group.position.x;
+        const az = a.group.position.z;
+        const dx = b.group.position.x - ax;
+        const dz = b.group.position.z - az;
+        const d = Math.hypot(dx, dz);
+        if (d >= MIN_WALK_SEP || d < 1e-4) continue;
+        const limitA = a.lateralLimit ?? 0.75;
+        const limitB = b.lateralLimit ?? 0.75;
+        const sign = a.lateral === b.lateral ? (i < j ? 1 : -1) : Math.sign(a.lateral - b.lateral) || 1;
+        const push = Math.min(0.06, (MIN_WALK_SEP - d) * 0.35 + 0.01) * sign;
+        const newA = Math.max(-limitA, Math.min(limitA, a.lateral + push));
+        const newB = Math.max(-limitB, Math.min(limitB, b.lateral - push));
+        if (newA !== a.lateral) {
+          a.lateral = newA;
+          const pa = a.patrol ? this.patrolPosition(a) : ringPosition(a.half, a.t, a.lateral);
+          a.group.position.set(pa.x, a.group.position.y, pa.z);
+          a.group.rotation.y = pa.rot;
+        }
+        if (newB !== b.lateral) {
+          b.lateral = newB;
+          const pb = b.patrol ? this.patrolPosition(b) : ringPosition(b.half, b.t, b.lateral);
+          b.group.position.set(pb.x, b.group.position.y, pb.z);
+          b.group.rotation.y = pb.rot;
+        }
+      }
     }
 
     // ---- stalls (soft open / close as the mood shifts)
