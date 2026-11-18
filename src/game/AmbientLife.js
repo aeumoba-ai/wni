@@ -201,6 +201,7 @@ export class AmbientLife {
     this.seedKey = null;
     this.quality = 1;
     this._qualityKey = null;
+    this.pixelTextures = false;
 
     this.vehicles = [];
     this.walkers = [];
@@ -385,6 +386,25 @@ export class AmbientLife {
 
   /* ------------------------------------------------------------ lifecycle */
 
+  /** Switch every canvas texture of the street life between normal & pixel art. */
+  setPixelStyle(pixel) {
+    const next = Boolean(pixel);
+    if (this.pixelTextures === next) return;
+    this.pixelTextures = next;
+    this.group.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of mats) {
+        const ad = mat?.userData?.ad;
+        if (!ad) continue;
+        const oldMap = mat.map;
+        mat.map = makeAdTexture(ad.lines, ad.bg, ad.fg, ad.sub, next);
+        mat.needsUpdate = true;
+        if (oldMap) oldMap.dispose();
+      }
+    });
+  }
+
   setQuality(graphics) {
     const detail = graphics?.detail ?? 1;
     const effects = graphics?.effects ?? 1;
@@ -466,6 +486,8 @@ export class AmbientLife {
   }
 
   applyLevel() {
+    // Naikkan versi props supaya Scene3D bisa menyegarkan pembersihan kanopi.
+    this.propsVersion = (this.propsVersion || 0) + 1;
     const q = this.quality;
     const budget = {
       vehicles: Math.max(2, Math.round(this.currentLevel.vehicles * q)),
@@ -949,10 +971,11 @@ export class AmbientLife {
       this.box(group, '#475569', 0.28, 7.2, 0.28, -2.4, 3.6, 0);
       this.box(group, '#475569', 0.28, 7.2, 0.28, 2.4, 3.6, 0);
       this.box(group, '#f8fafc', 6.0, 3.1, 0.22, 0, 6.0, 0);
-      const tex = makeAdTexture(ad.lines, ad.bg, ad.fg, ad.sub);
+      const tex = makeAdTexture(ad.lines, ad.bg, ad.fg, ad.sub, this.pixelTextures);
       const adMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 });
       adMat.userData.localMaterial = true;
       adMat.userData.localTexture = true;
+      adMat.userData.ad = ad;
       const board = new THREE.Mesh(this.geo.box, adMat);
       board.scale.set(5.7, 2.8, 0.08);
       board.position.set(0, 6.0, 0.15);
@@ -2439,12 +2462,15 @@ function ringPosition(half, dist, lateral = 0) {
   return { x, z, rot };
 }
 
-function makeAdTexture(lines, bg, fg, sub) {
+function makeAdTexture(lines, bg, fg, sub, pixel = false) {
   if (typeof document === 'undefined') return null;
   const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 256;
+  const aScale = pixel ? 0.3 : 1;
+  canvas.width = Math.round(512 * aScale);
+  canvas.height = Math.round(256 * aScale);
   const ctx = canvas.getContext('2d');
+  if (pixel) ctx.scale(aScale, aScale);
+  ctx.imageSmoothingEnabled = !pixel;
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = 'rgba(255,255,255,0.14)';
@@ -2475,6 +2501,11 @@ function makeAdTexture(lines, bg, fg, sub) {
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  if (pixel) {
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+  }
   tex.needsUpdate = true;
   return tex;
 }

@@ -86,11 +86,18 @@ function drawOutlinedText(ctx, text, x, y, font, fill = '#ffffff', stroke = '#1c
   ctx.fillText(text, x, y);
 }
 
-function makeTileTexture(tile, ownerInfo = null) {
+function makeTileTexture(tile, ownerInfo = null, pixel = false) {
   const canvas = document.createElement('canvas');
-  canvas.width = 280;
-  canvas.height = 420;
+  // In pixel mode the whole board is painted on a tiny canvas and magnified
+  // with nearest-neighbour filtering → every tile becomes real pixel art.
+  const scale = pixel ? 0.42 : 1;
+  canvas.width = Math.round(280 * scale);
+  canvas.height = Math.round(420 * scale);
   const ctx = canvas.getContext('2d');
+  if (pixel) {
+    ctx.scale(scale, scale);
+    ctx.imageSmoothingEnabled = false;
+  }
 
   // Tile surface matching gameplay-3.jpg (warm ivory / beige for special, teal-tinted when owned)
   let baseFill = '#efeadf';
@@ -166,7 +173,8 @@ function makeTileTexture(tile, ownerInfo = null) {
   }
   if (line) lines.push(line);
 
-  const fontSize = lines.length >= 3 ? 27 : lines[0].length > 10 ? 29 : 34;
+  const outline = pixel ? 4 : 7;
+  const fontSize = (lines.length >= 3 ? 27 : lines[0].length > 10 ? 29 : 34) * (pixel ? 1.15 : 1);
   const startY = 264 - (lines.length - 1) * 18;
   lines.forEach((ln, idx) => {
     drawOutlinedText(
@@ -177,7 +185,7 @@ function makeTileTexture(tile, ownerInfo = null) {
       `400 ${fontSize}px "Lilita One", "Baloo 2", sans-serif`,
       '#ffffff',
       '#1e150e',
-      7
+      outline
     );
   });
 
@@ -202,24 +210,32 @@ function makeTileTexture(tile, ownerInfo = null) {
       ownerInfo.name.slice(0, 14),
       140,
       388,
-      '800 23px "Plus Jakarta Sans", sans-serif',
+      `800 ${pixel ? 27 : 23}px "Plus Jakarta Sans", sans-serif`,
       '#ffffff',
       '#172026',
-      4
+      pixel ? 3 : 4
     );
   }
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  if (pixel) {
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+  } else {
+    tex.anisotropy = 4;
+  }
   return tex;
 }
 
-function makeDiceFaceTexture(value) {
+function makeDiceFaceTexture(value, pixel = false) {
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
+  const dScale = pixel ? 0.34 : 1;
+  canvas.width = Math.round(128 * dScale);
+  canvas.height = Math.round(128 * dScale);
   const ctx = canvas.getContext('2d');
+  if (pixel) ctx.scale(dScale, dScale);
 
   ctx.fillStyle = '#fcfbf7';
   ctx.fillRect(0, 0, 128, 128);
@@ -271,6 +287,11 @@ function makeDiceFaceTexture(value) {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  if (pixel) {
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+  }
   return tex;
 }
 
@@ -283,36 +304,123 @@ const DICE_TOP_ROTATIONS = {
   6: new THREE.Euler(Math.PI, 0, 0),
 };
 
-function makeBuildingWindowTexture(baseHex) {
+function makeBuildingWindowTexture(baseHex, pixel = false) {
+  // Fasad gedung Indonesia: lantai toko di bawah (kanopi bergaris + kaca gelap
+  // + papan nama), lantai atas dengan jendela berbingkai, AC tempel, balkon
+  // kecil dan jemuran. Cukup detail untuk dilihat dekat, tetap 1 tekstur.
+  const W = 256;
+  const H = 512;
   const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 256;
+  const fScale = pixel ? 0.2 : 1;
+  canvas.width = Math.round(W * fScale);
+  canvas.height = Math.round(H * fScale);
   const ctx = canvas.getContext('2d');
+  if (pixel) ctx.scale(fScale, fScale);
+  ctx.imageSmoothingEnabled = !pixel;
+
+  const shade = (hex, amount) => {
+    const c = new THREE.Color(hex);
+    c.offsetHSL(0, 0, amount);
+    return `#${c.getHexString()}`;
+  };
+
   ctx.fillStyle = baseHex;
-  ctx.fillRect(0, 0, 128, 256);
+  ctx.fillRect(0, 0, W, H);
 
-  // Subtle floor bands
-  ctx.fillStyle = 'rgba(0,0,0,0.06)';
-  for (let y = 0; y < 256; y += 24) {
-    ctx.fillRect(0, y, 128, 3);
+  // ---- plint / lantai dasar (toko) ----
+  const shopTop = H - 104;
+  ctx.fillStyle = shade(baseHex, -0.12);
+  ctx.fillRect(0, shopTop, W, 104);
+  // kaca toko
+  ctx.fillStyle = '#2f4858';
+  ctx.fillRect(10, shopTop + 32, W - 20, 62);
+  ctx.fillStyle = 'rgba(140,215,235,0.55)';
+  ctx.fillRect(16, shopTop + 38, (W - 32) * 0.42, 50);
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.fillRect(20, shopTop + 42, 10, 42);
+  // tiang & pintu
+  ctx.fillStyle = shade(baseHex, -0.2);
+  for (let x = 4; x < W; x += 44) ctx.fillRect(x, shopTop + 28, 8, 68);
+  // kanopi bergaris (awning)
+  const stripes = ['#dc2626', '#f8fafc'];
+  for (let i = 0; i < 10; i++) {
+    ctx.fillStyle = stripes[i % 2];
+    const x = 6 + i * 25;
+    ctx.beginPath();
+    ctx.moveTo(x, shopTop + 4);
+    ctx.lineTo(x + 24, shopTop + 4);
+    ctx.lineTo(x + 20, shopTop + 26);
+    ctx.lineTo(x + 4, shopTop + 26);
+    ctx.closePath();
+    ctx.fill();
   }
+  // papan nama toko
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(60, shopTop + 6, 96, 12);
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(66, shopTop + 9, 84, 5);
 
-  for (let y = 10; y < 246; y += 24) {
-    for (let x = 10; x < 118; x += 22) {
-      const lit = Math.random() > 0.22;
-      ctx.fillStyle = lit ? '#6ea6c9' : '#e5d8b8';
-      ctx.fillRect(x, y, 14, 14);
-      ctx.strokeStyle = '#475569';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, y, 14, 14);
+  // ---- lantai atas: jendela berbingkai ----
+  const floorH = 64;
+  let floor = 0;
+  for (let y = 26; y < shopTop - 12; y += floorH, floor++) {
+    // garis lantai (slab)
+    ctx.fillStyle = 'rgba(0,0,0,0.14)';
+    ctx.fillRect(0, y - 6, W, 5);
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.fillRect(0, y - 1, W, 2);
+    for (let x = 14; x < W - 30; x += 60) {
+      const lit = ((x * 7 + y * 13) % 11) > 6;
+      // bingkai jendela
+      ctx.fillStyle = shade(baseHex, 0.16);
+      ctx.fillRect(x - 3, y - 3, 34, 42);
+      // kaca
+      ctx.fillStyle = lit ? '#f6e2a8' : '#6ea6c9';
+      ctx.fillRect(x, y, 28, 36);
+      // pantulan & kusen
+      ctx.fillStyle = lit ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)';
+      ctx.fillRect(x + 2, y + 2, 10, 32);
+      ctx.fillStyle = 'rgba(15,23,42,0.35)';
+      ctx.fillRect(x + 13, y, 2, 36);
+      // ambang
+      ctx.fillStyle = shade(baseHex, -0.16);
+      ctx.fillRect(x - 4, y + 38, 36, 4);
+      // AC tempel di sebagian jendela
+      if ((x + y) % 3 === 0) {
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillRect(x + 20, y + 24, 14, 10);
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(x + 22, y + 26, 10, 6);
+      }
+    }
+    // balkon tipis pada lantai genap
+    if (floor % 2 === 1) {
+      ctx.fillStyle = 'rgba(226,232,240,0.75)';
+      ctx.fillRect(8, y + 42, W - 16, 5);
+      ctx.fillStyle = 'rgba(15,23,42,0.18)';
+      ctx.fillRect(8, y + 47, W - 16, 2);
     }
   }
+
+  // ---- atap: parapet + tangki air ----
+  ctx.fillStyle = shade(baseHex, -0.06);
+  ctx.fillRect(0, 0, W, 18);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillRect(0, 16, W, 3);
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  if (pixel) {
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+  } else {
+    tex.anisotropy = 4;
+  }
   return tex;
 }
 
-/** Tiny deterministic PRNG so the outer city looks the same on every reload. */
+/** Tiny deterministic PRNG so the city (and its rooftop clutter) is stable. */
 function seededRandom(seed) {
   let a = seed >>> 0;
   return () => {
@@ -454,7 +562,7 @@ export class Scene3D {
         if (match) ownerInfo = { name: match[2], color: match[3] };
       }
       const oldMap = mesh.material.map;
-      mesh.material.map = makeTileTexture(tile, ownerInfo);
+      mesh.material.map = makeTileTexture(tile, ownerInfo, this.pixelStyle);
       mesh.material.needsUpdate = true;
       if (oldMap) oldMap.dispose();
     }
@@ -698,10 +806,12 @@ export class Scene3D {
 
     // Dense crisp low-poly Indonesian city buildings surrounding the park
     const bColors = ['#ece9e1', '#e0e7ec', '#f2e8da', '#e2eae2', '#eae4eb'];
-    const buildingTextures = bColors.map((c) => makeBuildingWindowTexture(c));
+    const buildingTextures = bColors.map((c) => makeBuildingWindowTexture(c, this.pixelStyle));
+    this.cityFacades = bColors.map((c, i) => ({ color: c, material: null, index: i }));
     const roofMat = new THREE.MeshStandardMaterial({ color: '#d5dde5', roughness: 0.82 });
 
     const citySpots = [];
+    const cityDetail = []; // per-building details, drawn later as instanced meshes
     for (let x = -54; x <= 54; x += 8.2) {
       citySpots.push([x, -49], [x, -58], [x, 42]);
     }
@@ -714,6 +824,8 @@ export class Scene3D {
       const bh = 7 + ((i * 29) % 14);
       const tex = buildingTextures[i % buildingTextures.length];
       const sideMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.72 });
+      const slot = i % this.cityFacades.length;
+      if (!this.cityFacades[slot].material) this.cityFacades[slot].material = sideMat;
       const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), [
         sideMat,
         sideMat,
@@ -729,11 +841,168 @@ export class Scene3D {
       b.receiveShadow = true;
       this.scene.add(b);
       solid(bpx, bpz, bw / 2, bd / 2, bh);
+      cityDetail.push({ x: bpx, z: bpz, y: bh, w: bw, d: bd, h: bh, i });
     });
+
+    // Detail atap & fasad supaya bangunan terlihat seperti ruko Indonesia asli:
+    // tandon air, AC tempel, kanopi toko bergaris, antena, dan tangga atap.
+    this.buildCityDetails(cityDetail);
 
     // Kota luar: kampung, kawasan industri, rice fields, bukit & jalan tol yang
     // membuat peta terasa sangat luas (radius ±300) tanpa membebani render.
     this.buildOuterCity();
+  }
+
+  /** Rooftop tanks, AC units, shop awnings and antennas for the core buildings.
+      Everything is instanced: the whole set costs five draw calls. */
+  buildCityDetails(buildings) {
+    if (!buildings.length) return;
+    const group = new THREE.Group();
+    group.name = 'cityDetails';
+    this.scene.add(group);
+    this.cityDetails = group;
+    const dummy = new THREE.Object3D();
+    const rand = seededRandom(778899);
+    const tankColors = ['#f97316', '#e2e8f0', '#cbd5e1', '#38bdf8', '#facc15'];
+    const awningColors = ['#dc2626', '#0ea5e9', '#16a34a', '#f59e0b', '#7c3aed', '#f8fafc'];
+
+    const tanks = [];
+    const roofAc = [];
+    const wallAc = [];
+    const awnings = [];
+    const antennas = [];
+
+    for (const b of buildings) {
+      const toCenter = Math.atan2(-b.x, -b.z); // arah menghadap taman
+      // tandon air di atap
+      if (rand() > 0.22) {
+        tanks.push({
+          x: b.x + (rand() - 0.5) * b.w * 0.45,
+          y: b.h + 0.62,
+          z: b.z + (rand() - 0.5) * b.d * 0.45,
+          color: tankColors[Math.floor(rand() * tankColors.length)],
+          r: 0.42 + rand() * 0.2,
+        });
+      }
+      // AC/ kondensor di atap & di fasad
+      const roofUnits = rand() > 0.5 ? 2 : 1;
+      for (let k = 0; k < roofUnits; k++) {
+        roofAc.push({
+          x: b.x + (rand() - 0.5) * b.w * 0.7,
+          y: b.h + 0.18,
+          z: b.z + (rand() - 0.5) * b.d * 0.7,
+          yaw: rand() > 0.5 ? 0 : Math.PI / 2,
+        });
+      }
+      for (let k = 0; k < 2; k++) {
+        const level = 0.35 + rand() * 0.45;
+        const push = Math.max(b.w, b.d) / 2;
+        wallAc.push({
+          x: b.x + Math.sin(toCenter) * (push + 0.12) + (rand() - 0.5) * 0.9,
+          y: b.h * level,
+          z: b.z + Math.cos(toCenter) * (push + 0.12) + (rand() - 0.5) * 0.9,
+          yaw: toCenter,
+        });
+      }
+      // kanopi toko menghadap taman
+      awnings.push({
+        x: b.x + Math.sin(toCenter) * (b.w / 2 + 0.55),
+        y: 3.15,
+        z: b.z + Math.cos(toCenter) * (b.w / 2 + 0.55),
+        yaw: toCenter,
+        w: b.w * 0.78,
+        color: awningColors[Math.floor(rand() * awningColors.length)],
+      });
+      // antena TV
+      if (rand() > 0.62) {
+        antennas.push({
+          x: b.x + (rand() - 0.5) * b.w * 0.5,
+          y: b.h + 1.35,
+          z: b.z + (rand() - 0.5) * b.d * 0.5,
+        });
+      }
+    }
+
+    const instanced = (items, geo, mat, apply) => {
+      if (!items.length) return null;
+      const mesh = new THREE.InstancedMesh(geo, mat, items.length);
+      items.forEach((item, i) => {
+        apply(item, dummy);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      group.add(mesh);
+      return mesh;
+    };
+
+    // tandon air (tabung)
+    const tankMesh = instanced(
+      tanks,
+      new THREE.CylinderGeometry(0.55, 0.55, 1.25, 10),
+      new THREE.MeshStandardMaterial({ roughness: 0.7 }),
+      (t, d) => {
+        d.position.set(t.x, t.y, t.z);
+        d.rotation.set(0, 0, 0);
+        d.scale.set(t.r / 0.55, 1, t.r / 0.55);
+      },
+    );
+    if (tankMesh) tanks.forEach((t, i) => tankMesh.setColorAt(i, new THREE.Color(t.color)));
+
+    // AC atap (kotak)
+    instanced(
+      roofAc,
+      new THREE.BoxGeometry(0.9, 0.5, 0.7),
+      new THREE.MeshStandardMaterial({ color: '#cbd5e1', roughness: 0.65 }),
+      (u, d) => {
+        d.position.set(u.x, u.y, u.z);
+        d.rotation.set(0, u.yaw, 0);
+        d.scale.set(1, 1, 1);
+      },
+    );
+
+    // AC tempel di fasad
+    instanced(
+      wallAc,
+      new THREE.BoxGeometry(0.62, 0.42, 0.34),
+      new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.6 }),
+      (u, d) => {
+        d.position.set(u.x, u.y, u.z);
+        d.rotation.set(0, u.yaw, 0);
+        d.scale.set(1, 1, 1);
+      },
+    );
+
+    // kanopi toko (miring sedikit)
+    const awningMesh = instanced(
+      awnings,
+      new THREE.BoxGeometry(1, 0.1, 1.15),
+      new THREE.MeshStandardMaterial({ roughness: 0.75 }),
+      (a, d) => {
+        d.position.set(a.x, a.y, a.z);
+        d.rotation.set(0.17, a.yaw, 0);
+        d.scale.set(a.w, 1, 1);
+      },
+    );
+    if (awningMesh) awnings.forEach((a, i) => awningMesh.setColorAt(i, new THREE.Color(a.color)));
+    // Kanopi toko disimpan supaya bisa disembunyikan bila ada props yang menabraknya.
+    this.cityAwnings = awningMesh;
+    this.cityAwningItems = awnings;
+    this.awningSignature = '';
+
+    // antena TV
+    instanced(
+      antennas,
+      new THREE.CylinderGeometry(0.035, 0.05, 2.7, 4),
+      new THREE.MeshStandardMaterial({ color: '#94a3b8', roughness: 0.5, metalness: 0.3 }),
+      (a, d) => {
+        d.position.set(a.x, a.y, a.z);
+        d.rotation.set(0, 0, 0);
+        d.scale.set(1, 1, 1);
+      },
+    );
   }
 
   /* ====================== KOTA LUAR (PETA TERASA SANGAT LUAS) ==============
@@ -782,10 +1051,11 @@ export class Scene3D {
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
     // Satu tekstur jendela dipakai bersama semua gedung luar (instanced → 1 draw call).
     const bodyMat = new THREE.MeshStandardMaterial({
-      map: makeBuildingWindowTexture('#efeee8'),
+      map: makeBuildingWindowTexture('#efeee8', this.pixelStyle),
       roughness: 0.78,
       metalness: 0,
     });
+    bodyMat.userData.outerFacade = true;
     const roofMatOuter = new THREE.MeshStandardMaterial({ roughness: 0.85 });
     const bands = [
       {
@@ -1162,7 +1432,7 @@ export class Scene3D {
     this.currentBoardSeed = boardSeed;
 
     for (const tile of boardTiles) {
-      const tex = makeTileTexture(tile, null);
+      const tex = makeTileTexture(tile, null, this.pixelStyle);
       const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.76 });
       const mesh = new THREE.Mesh(this.tileSectorGeo, mat);
       const angle = tileAngle(tile.id);
@@ -1258,15 +1528,59 @@ export class Scene3D {
     }
   }
 
+  /** Aturan "tidak ada objek bertumpuk": kanopi toko yang menabrak props kota
+      (tiang lampu, pohon, baliho, warung…) disembunyikan. Dipanggil berkala
+      dengan tanda-tangan jumlah props supaya tidak dihitung tiap frame. */
+  refreshAwningClearance(force = false) {
+    const mesh = this.cityAwnings;
+    const items = this.cityAwningItems;
+    if (!mesh || !items?.length) return;
+    const props = (this.ambient?.group?.children || [])
+      .filter((child) => child.userData?.solid && !child.userData?.unplaced)
+      .map((child) => child.userData.solid);
+    const signature = `${props.length}:${items.length}:${this.ambient?.propsVersion || 0}`;
+    if (!force && signature === this.awningSignature) return;
+    this.awningSignature = signature;
+    const dummy = new THREE.Object3D();
+    let hidden = 0;
+    items.forEach((a, i) => {
+      const halfDepth = 0.62;
+      const blocked = props.some((p) => {
+        if ((p.y0 ?? 0) > a.y + 0.25) return false;
+        if ((p.h ?? 0) < a.y - 0.55) return false;
+        const rad = (p.r ?? 0) * 0.7;
+        const dx = p.x - a.x;
+        const dz = p.z - a.z;
+        const along = dx * Math.sin(a.yaw) + dz * Math.cos(a.yaw);
+        const across = dx * Math.cos(a.yaw) - dz * Math.sin(a.yaw);
+        return Math.abs(across) < a.w / 2 + rad && Math.abs(along) < halfDepth + rad;
+      });
+      if (blocked) hidden += 1;
+      const sc = blocked ? 0.0001 : 1;
+      dummy.position.set(a.x, a.y, a.z);
+      dummy.rotation.set(0.17, a.yaw, 0);
+      dummy.scale.set(a.w * sc, sc, sc);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    this.awningsHidden = hidden;
+  }
+
   buildDice() {
     const faceValues = [3, 4, 1, 6, 2, 5];
-    const mats = faceValues.map((v) => new THREE.MeshStandardMaterial({ map: makeDiceFaceTexture(v), roughness: 0.32 }));
+    const mats = faceValues.map((v) => {
+      const mat = new THREE.MeshStandardMaterial({ map: makeDiceFaceTexture(v, this.pixelStyle), roughness: 0.32 });
+      mat.userData.diceValue = v;
+      return mat;
+    });
     const geo = new THREE.BoxGeometry(0.98, 0.98, 0.98);
 
     [-0.95, 0.95].forEach((xOffset) => {
       const die = new THREE.Mesh(geo, mats);
       die.position.set(xOffset, BOARD_Y + 0.62, 0.75);
       die.castShadow = true;
+      die.materials = mats;
       this.scene.add(die);
       this.dice.push(die);
     });
@@ -1579,23 +1893,100 @@ export class Scene3D {
     if (this.renderer) {
       this.renderer.toneMapping = this.pixelStyle ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
       this.renderer.toneMappingExposure = this.pixelStyle ? 1 : 1.08;
+      // Pixel art memakai bayangan keras tanpa gradasi.
+      this.renderer.shadowMap.type = this.pixelStyle ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+      this.renderer.shadowMap.needsUpdate = true;
     }
     if (!this.scene) return;
+    // Posterise every colour so nothing keeps a smooth 24-bit gradient: the
+    // whole scene (gedung, papan, pion, karakter, perabot jalan) berubah total.
+    if (!this.pixelColorDefaults) this.pixelColorDefaults = new WeakMap();
     this.scene.traverse((object) => {
       if (!object.isMesh) return;
-      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      this.applyPixelMaterialTone(object);
+    });
+    this.reskinTexturesForStyle();
+  }
+
+  /** Faceted + posterised materials for one object (or a whole subtree). */
+  applyPixelMaterialTone(object) {
+    if (!object) return;
+    if (!this.pixelColorDefaults) this.pixelColorDefaults = new WeakMap();
+    const steps = 7;
+    const visit = (mesh) => {
+      if (!mesh.isMesh) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const material of materials) {
-        if (!material || !('flatShading' in material)) continue;
-        if (!this.pixelMaterialDefaults.has(material)) {
-          this.pixelMaterialDefaults.set(material, Boolean(material.flatShading));
+        if (!material) continue;
+        if ('flatShading' in material) {
+          if (!this.pixelMaterialDefaults.has(material)) {
+            this.pixelMaterialDefaults.set(material, Boolean(material.flatShading));
+          }
+          const nextFlat = this.pixelStyle ? true : this.pixelMaterialDefaults.get(material);
+          if (material.flatShading !== nextFlat) {
+            material.flatShading = nextFlat;
+            material.needsUpdate = true;
+          }
         }
-        const nextFlat = this.pixelStyle ? true : this.pixelMaterialDefaults.get(material);
-        if (material.flatShading !== nextFlat) {
-          material.flatShading = nextFlat;
-          material.needsUpdate = true;
+        if (!material.color) continue;
+        if (!this.pixelColorDefaults.has(material)) {
+          this.pixelColorDefaults.set(material, material.color.clone());
+        }
+        const original = this.pixelColorDefaults.get(material);
+        if (this.pixelStyle) {
+          const q = (v) => Math.round(v * steps) / steps;
+          material.color.setRGB(q(original.r), q(original.g), q(original.b));
+        } else {
+          material.color.copy(original);
+        }
+        material.needsUpdate = true;
+      }
+    };
+    if (object.isMesh) visit(object);
+    else object.traverse(visit);
+  }
+
+  /** Re-draw every canvas texture (papan, fasad, dadu, baliho) in the new style. */
+  reskinTexturesForStyle() {
+    const pixel = this.pixelStyle;
+    if (this.cityFacades) {
+      for (const entry of this.cityFacades) {
+        if (!entry.material) continue;
+        const oldMap = entry.material.map;
+        entry.material.map = makeBuildingWindowTexture(entry.color, pixel);
+        entry.material.needsUpdate = true;
+        if (oldMap) oldMap.dispose();
+      }
+    }
+    if (this.outerCity) {
+      // The instanced districts share one material → refresh it exactly once.
+      const seen = new Set();
+      for (const child of this.outerCity.children) {
+        if (!child.isMesh) continue;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          if (!mat?.map || !mat.userData?.outerFacade || seen.has(mat)) continue;
+          seen.add(mat);
+          const oldMap = mat.map;
+          mat.map = makeBuildingWindowTexture('#efeee8', pixel);
+          mat.needsUpdate = true;
+          if (oldMap) oldMap.dispose();
         }
       }
-    });
+    }
+    if (this.dice?.length) {
+      for (const die of this.dice) {
+        for (const mat of die.materials || []) {
+          if (!mat?.userData?.diceValue) continue;
+          const oldMap = mat.map;
+          mat.map = makeDiceFaceTexture(mat.userData.diceValue, pixel);
+          mat.needsUpdate = true;
+          if (oldMap) oldMap.dispose();
+        }
+      }
+    }
+    if (this.tileMeshes?.size) this.refreshAllTileFonts();
+    this.ambient?.setPixelStyle?.(pixel);
   }
 
   updateRenderResolution() {
@@ -1605,8 +1996,8 @@ export class Scene3D {
     if (this.pixelStyle) {
       // Render the world to a deliberately small buffer, then nearest-neighbour
       // upscale it. Keep UI DOM layers crisp above the WebGL canvas.
-      const cap = this.isCompactViewport ? 0.78 : 0.92;
-      this.renderer.setPixelRatio(Math.max(0.34, Math.min(qualityRatio * 0.42, cap)));
+      const cap = this.isCompactViewport ? 0.85 : 1.0;
+      this.renderer.setPixelRatio(Math.max(0.4, Math.min(qualityRatio * 0.55, cap)));
     } else {
       const cap = this.isCompactViewport ? 1.35 : 1.8;
       this.renderer.setPixelRatio(Math.max(0.65, Math.min(qualityRatio, cap)));
@@ -1840,7 +2231,7 @@ export class Scene3D {
           const mesh = this.tileMeshes.get(tile.id);
           if (mesh) {
             const oldMap = mesh.material.map;
-            mesh.material.map = makeTileTexture(tile, null);
+            mesh.material.map = makeTileTexture(tile, null, this.pixelStyle);
             mesh.material.needsUpdate = true;
             if (oldMap) oldMap.dispose();
           }
@@ -1879,7 +2270,8 @@ export class Scene3D {
           const oldMap = mesh.material.map;
           mesh.material.map = makeTileTexture(
             tile,
-            owner ? { name: owner.name, color: ownerChar.color } : null
+            owner ? { name: owner.name, color: ownerChar.color } : null,
+            this.pixelStyle
           );
           mesh.material.needsUpdate = true;
           if (oldMap) oldMap.dispose();
@@ -1915,6 +2307,7 @@ export class Scene3D {
 
       if (!pawn) {
         const built = this.createPawnMesh(pl.characterId, isCurrent);
+        if (this.pixelStyle) this.applyPixelMaterialTone(built.group); // pion & karakter ikut pixel
         this.scene.add(built.group);
         const initPos = tileWorldPos(pl.position, R_MID);
         built.group.position.copy(initPos);
@@ -1974,20 +2367,8 @@ export class Scene3D {
       }),
       tileId,
     );
-    if (this.pixelStyle) {
-      group.traverse((object) => {
-        if (!object.isMesh) return;
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        for (const material of materials) {
-          if (!material || !('flatShading' in material)) continue;
-          if (!this.pixelMaterialDefaults.has(material)) {
-            this.pixelMaterialDefaults.set(material, Boolean(material.flatShading));
-          }
-          material.flatShading = true;
-          material.needsUpdate = true;
-        }
-      });
-    }
+    // Pixel mode: fresh building materials must match the posterised look too.
+    if (this.pixelStyle) this.applyPixelMaterialTone(group);
     if (this.smoothAnimation) {
       group.scale.set(1.15, 0.05, 1.15);
       this.buildingSprings.push({
@@ -2296,6 +2677,9 @@ export class Scene3D {
     if (this.ambient) {
       this.ambient.update(dt);
       this.applyTimeOfDay(this.ambient.hour);
+      // Kanopi toko dicek berkala (murah: hanya bila jumlah props berubah).
+      this.awningTick = (this.awningTick || 0) + 1;
+      if (this.awningTick % 40 === 0) this.refreshAwningClearance();
     }
 
     if (this.flagMesh) {
