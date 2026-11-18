@@ -546,7 +546,11 @@ export class Scene3D {
     this.handleResize();
 
     // Living Indonesian city around the board (vehicles, pedestrians, stalls…).
-    this.ambient = new AmbientLife(this.scene, { compact: this.isCompactViewport, solids: this.citySolids });
+    this.ambient = new AmbientLife(this.scene, {
+      compact: this.isCompactViewport,
+      solids: this.citySolids,
+      roads: this.extraRoads || [],
+    });
     this.ambient.setQuality(this.graphics);
     if (import.meta.env?.DEV) {
       window.__scene3d = this; // dev-only debugging hook
@@ -662,6 +666,148 @@ export class Scene3D {
       r.position.set(x, 0.04, z);
       r.receiveShadow = true;
       this.scene.add(r);
+    }
+
+    // === JENJANG JALAN: jalan raya (di atas) → jalan kecil → gang =========
+    // Jalan kecil (lingkungan) di luar baris ruko: lebih sempit, tanpa marka
+    // tengah, warnanya sedikit lebih muda, dengan kanstin batu.
+    const smallRoadMat = new THREE.MeshStandardMaterial({ color: '#4d5561', roughness: 0.94 });
+    const curbMat = new THREE.MeshStandardMaterial({ color: '#d8d3c6', roughness: 0.9 });
+    const gangMat = new THREE.MeshStandardMaterial({ color: '#7c7364', roughness: 0.97 });
+    this.extraRoads = [];
+    const smallRoads = [
+      { fixed: 'x', at: 56.5, half: 2.2, from: -34, to: 64 },
+      { fixed: 'x', at: -56.5, half: 2.2, from: -34, to: 64 },
+      { fixed: 'z', at: 50.5, half: 2.2, from: -64, to: 64 },
+    ];
+    for (const road of smallRoads) {
+      const len = road.to - road.from;
+      const mid = (road.to + road.from) / 2;
+      const geo = road.fixed === 'x'
+        ? new THREE.BoxGeometry(road.half * 2, 0.07, len)
+        : new THREE.BoxGeometry(len, 0.07, road.half * 2);
+      const mesh = new THREE.Mesh(geo, smallRoadMat);
+      mesh.position.set(
+        road.fixed === 'x' ? road.at : mid,
+        0.035,
+        road.fixed === 'x' ? mid : road.at,
+      );
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+      // kanstin di kedua sisi
+      for (const side of [-1, 1]) {
+        const curbGeo = road.fixed === 'x'
+          ? new THREE.BoxGeometry(0.22, 0.14, len)
+          : new THREE.BoxGeometry(len, 0.14, 0.22);
+        const curb = new THREE.Mesh(curbGeo, curbMat);
+        curb.position.set(
+          road.fixed === 'x' ? road.at + side * (road.half + 0.11) : mid,
+          0.07,
+          road.fixed === 'x' ? mid : road.at + side * (road.half + 0.11),
+        );
+        curb.receiveShadow = true;
+        this.scene.add(curb);
+      }
+      this.extraRoads.push(road);
+    }
+
+    // Gang sempit di antara dua baris bangunan (beton, ada got & jemuran).
+    const gangs = [
+      { fixed: 'x', at: 45, half: 1.15, from: -38, to: 38 },
+      { fixed: 'x', at: -45, half: 1.15, from: -38, to: 38 },
+      { fixed: 'z', at: 46.8, half: 1.15, from: -52, to: 52 },
+    ];
+    this.gangLines = [];
+    for (const gang of gangs) {
+      const len = gang.to - gang.from;
+      const mid = (gang.to + gang.from) / 2;
+      const geo = gang.fixed === 'x'
+        ? new THREE.BoxGeometry(gang.half * 2, 0.06, len)
+        : new THREE.BoxGeometry(len, 0.06, gang.half * 2);
+      const strip = new THREE.Mesh(geo, gangMat);
+      strip.position.set(gang.fixed === 'x' ? gang.at : mid, 0.03, gang.fixed === 'x' ? mid : gang.at);
+      strip.receiveShadow = true;
+      this.scene.add(strip);
+      // got di satu sisi gang
+      const drainGeo = gang.fixed === 'x'
+        ? new THREE.BoxGeometry(0.26, 0.05, len)
+        : new THREE.BoxGeometry(len, 0.05, 0.26);
+      const drain = new THREE.Mesh(drainGeo, new THREE.MeshStandardMaterial({ color: '#4b463c', roughness: 0.95 }));
+      drain.position.set(
+        gang.fixed === 'x' ? gang.at + gang.half - 0.18 : mid,
+        0.055,
+        gang.fixed === 'x' ? mid : gang.at + gang.half - 0.18,
+      );
+      this.scene.add(drain);
+      this.extraRoads.push(gang);
+      this.gangLines.push(gang);
+    }
+
+    // Perabot khas gang: jemuran melintang, motor parkir, pot, gerobak rusak.
+    const clothMats = ['#f87171', '#60a5fa', '#fbbf24', '#a3e635', '#f8fafc', '#c084fc'].map(
+      (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.9, side: THREE.DoubleSide }),
+    );
+    const poleMat2 = new THREE.MeshStandardMaterial({ color: '#6b6257', roughness: 0.9 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: '#1f2430', roughness: 0.8 });
+    const detailRand = seededRandom(5150);
+    for (const gang of this.gangLines) {
+      const span = gang.to - gang.from;
+      for (let u = gang.from + 5; u < gang.to - 4; u += 9 + detailRand() * 5) {
+        const x = gang.fixed === 'x' ? gang.at : u;
+        const z = gang.fixed === 'x' ? u : gang.at;
+        // jemuran: dua tiang + tali + 2-3 kain
+        for (const side of [-1, 1]) {
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.1, 5), poleMat2);
+          pole.position.set(
+            x + (gang.fixed === 'x' ? side * (gang.half - 0.12) : 0),
+            1.55,
+            z + (gang.fixed === 'z' ? side * (gang.half - 0.12) : 0),
+          );
+          this.scene.add(pole);
+        }
+        const line = new THREE.Mesh(
+          new THREE.BoxGeometry(gang.fixed === 'x' ? gang.half * 2 : 0.03, 0.03, gang.fixed === 'x' ? 0.03 : gang.half * 2),
+          poleMat2,
+        );
+        line.position.set(x, 3.05, z);
+        this.scene.add(line);
+        for (let c = -1; c <= 1; c++) {
+          const cloth = new THREE.Mesh(
+            new THREE.PlaneGeometry(gang.fixed === 'x' ? 0.9 : 0.02, 0.7),
+            clothMats[Math.floor(detailRand() * clothMats.length)],
+          );
+          cloth.position.set(
+            x + (gang.fixed === 'x' ? 0 : c * 0.9),
+            2.62,
+            z + (gang.fixed === 'x' ? c * 0.9 : 0),
+          );
+          if (gang.fixed === 'z') cloth.rotation.y = Math.PI / 2;
+          this.scene.add(cloth);
+        }
+        // motor parkir di pinggir gang
+        const bike = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.32, 1.15), new THREE.MeshStandardMaterial({ color: ['#dc2626', '#0ea5e9', '#111827', '#16a34a'][Math.floor(detailRand() * 4)], roughness: 0.55 }));
+        body.position.y = 0.55;
+        body.castShadow = true;
+        bike.add(body);
+        for (const wz of [-0.42, 0.42]) {
+          const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.1, 8), tireMat);
+          wheel.rotation.z = Math.PI / 2;
+          wheel.position.set(0, 0.24, wz);
+          bike.add(wheel);
+        }
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.05), poleMat2);
+        bar.position.set(0, 0.85, -0.42);
+        bike.add(bar);
+        bike.position.set(
+          x + (gang.fixed === 'x' ? gang.half - 0.55 : (detailRand() - 0.5) * 0.6),
+          0,
+          z + (gang.fixed === 'z' ? gang.half - 0.55 : (detailRand() - 0.5) * 0.6),
+        );
+        if (gang.fixed === 'x') bike.rotation.y = Math.PI / 2;
+        this.scene.add(bike);
+        solid(bike.position.x, bike.position.z, 0.35, 0.35, 1.0);
+      }
     }
 
     // Elevated white concrete toll flyover wrapping the back & sides (exact look of gameplay-1 & gameplay-2!)
@@ -915,10 +1061,69 @@ export class Scene3D {
     for (let z = -36; z <= 36; z += 8.2) {
       citySpots.push([-40, z], [40, z], [-50, z], [50, z]);
     }
+    // Bahan bangunan pendukung: rumah kampung, sekolah, masjid, gudang…
+    this.cityMaterials = {
+      plaster: ['#f2e6d0', '#e8ddc6', '#dff0e4', '#f5efe3', '#e7e2f0', '#fbeee0'].map(
+        (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.85 }),
+      ),
+      clayRoof: ['#c1502e', '#a8452a', '#cf6a3a', '#8f5b3a'].map(
+        (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.82, flatShading: true }),
+      ),
+      metalRoof: new THREE.MeshStandardMaterial({ color: '#b9c2cc', roughness: 0.55, metalness: 0.25 }),
+      wood: new THREE.MeshStandardMaterial({ color: '#8a5a34', roughness: 0.85 }),
+      darkWood: new THREE.MeshStandardMaterial({ color: '#5b3a22', roughness: 0.9 }),
+      glass: new THREE.MeshStandardMaterial({ color: '#6ea6c9', roughness: 0.35, metalness: 0.15 }),
+      green: new THREE.MeshStandardMaterial({ color: '#2f8f43', roughness: 0.85 }),
+      white: new THREE.MeshStandardMaterial({ color: '#f7f5ee', roughness: 0.7 }),
+      gold: new THREE.MeshStandardMaterial({ color: '#d9a441', metalness: 0.55, roughness: 0.3 }),
+      crate: new THREE.MeshStandardMaterial({ color: '#d9a05b', roughness: 0.9 }),
+    };
+
+    // Tidak semua bangunan itu gedung: ruko, rumah kampung beratap genteng,
+    // kantor, warung, sekolah berpagar, masjid berkubah, dan gudang seng.
+    const kindWeights = [
+      ['ruko', 0.38],
+      ['rumah', 0.3],
+      ['kantor', 0.12],
+      ['warung', 0.08],
+      ['sekolah', 0.04],
+      ['masjid', 0.04],
+      ['gudang', 0.04],
+    ];
+    const pickKind = (roll) => {
+      let acc = 0;
+      for (const [kind, weight] of kindWeights) {
+        acc += weight;
+        if (roll < acc) return kind;
+      }
+      return 'ruko';
+    };
+
     citySpots.forEach(([bx, bz], i) => {
       const bw = 4.5 + ((i * 17) % 3) * 1.1;
       const bd = 4.5 + ((i * 11) % 3) * 1.0;
-      const bh = 7 + ((i * 29) % 14);
+      const kindRoll = seededRandom(1000 + i)();
+      const kind = pickKind(kindRoll);
+      const toCenter = Math.atan2(-bx, -bz);
+      const bpx = bx + ((i % 3) - 1) * 0.7;
+      const bpz = bz + (((i + 1) % 3) - 1) * 0.7;
+
+      if (kind === 'rumah' || kind === 'warung' || kind === 'masjid' || kind === 'sekolah' || kind === 'gudang') {
+        this.buildNeighbourhoodBuilding({
+          kind,
+          x: bpx,
+          z: bpz,
+          w: bw,
+          d: bd,
+          yaw: toCenter,
+          seed: 3000 + i,
+          solid,
+        });
+        return;
+      }
+
+      // Ruko & kantor: kotak fasad jendela (yang sekarang) + tinggi berbeda.
+      const bh = kind === 'kantor' ? 13 + ((i * 29) % 12) : 7 + ((i * 29) % 14);
       const tex = buildingTextures[i % buildingTextures.length];
       const sideMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.72 });
       const slot = i % this.cityFacades.length;
@@ -931,14 +1136,12 @@ export class Scene3D {
         sideMat,
         sideMat,
       ]);
-      const bpx = bx + ((i % 3) - 1) * 0.7;
-      const bpz = bz + (((i + 1) % 3) - 1) * 0.7;
       b.position.set(bpx, bh / 2, bpz);
       b.castShadow = true;
       b.receiveShadow = true;
       this.scene.add(b);
       solid(bpx, bpz, bw / 2, bd / 2, bh);
-      cityDetail.push({ x: bpx, z: bpz, y: bh, w: bw, d: bd, h: bh, i });
+      cityDetail.push({ x: bpx, z: bpz, y: bh, w: bw, d: bd, h: bh, i, kind });
     });
 
     // Detail atap & fasad supaya bangunan terlihat seperti ruko Indonesia asli:
@@ -949,6 +1152,95 @@ export class Scene3D {
     // Kota luar: kampung, kawasan industri, rice fields, bukit & jalan tol yang
     // membuat peta terasa sangat luas (radius ±300) tanpa membebani render.
     this.buildOuterCity();
+  }
+
+  /** Bangunan kampung: rumah beratap genteng, warung, sekolah, masjid, gudang.
+      Semua berada di dalam tapak yang sama dengan gedung sehingga tidak ada
+      objek yang bertumpuk, dan tetap 1 tapak = 1 solid untuk deteksi tabrakan.
+      Sumbu lokal bangunan: +X menghadap taman, +Z menyamping. */
+  buildNeighbourhoodBuilding({ kind, x, z, w, d, yaw, seed, solid }) {
+    const mats = this.cityMaterials;
+    const rand = seededRandom(seed);
+    const pick = (list) => list[Math.floor(rand() * list.length) % list.length];
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    group.rotation.y = yaw - Math.PI / 2; // local +X mengarah ke taman
+    const frontX = w / 2;
+
+    const box = (mat, ww, hh, dd) => new THREE.Mesh(new THREE.BoxGeometry(ww, hh, dd), mat);
+    const put = (mesh, ox, oy, oz = 0) => {
+      mesh.position.set(ox, oy, oz);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+      return mesh;
+    };
+
+    let height = 3.6;
+    if (kind === 'rumah') {
+      height = 3.3 + rand() * 0.9;
+      put(box(pick(mats.plaster), w, height, d), 0, height / 2);
+      const roofH = 1.5 + rand() * 0.5;
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 4), pick(mats.clayRoof));
+      roof.rotation.y = Math.PI / 4;
+      roof.scale.set(w * 0.84, roofH, d * 0.84);
+      put(roof, 0, height + roofH / 2 - 0.05);
+      put(box(mats.darkWood, 0.14, 1.9, 0.95), frontX, 0.95, 0);
+      put(box(mats.glass, 0.12, 0.85, 1.0), frontX, 2.15, d * 0.26);
+      put(box(mats.glass, 0.12, 0.85, 1.0), frontX, 2.15, -d * 0.26);
+      put(box(mats.metalRoof, 0.9, 0.1, 1.8), frontX + 0.3, 2.55);
+      put(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, 0.4, 7), mats.crate), frontX - 0.3, 0.2, d * 0.34);
+      put(new THREE.Mesh(new THREE.SphereGeometry(0.28, 7, 6), mats.green), frontX - 0.3, 0.55, d * 0.34);
+    } else if (kind === 'warung') {
+      height = 2.8 + rand() * 0.4;
+      put(box(pick(mats.plaster), w, height, d), 0, height / 2);
+      put(box(mats.metalRoof, w * 1.02, 0.16, d * 1.02), 0, height + 0.08);
+      put(box(mats.white, 0.12, 0.5, w * 0.8), frontX, height - 0.35);
+      put(box(mats.darkWood, 0.14, 0.9, w * 0.62), frontX, 0.9);
+      put(box(mats.crate, 0.5, 0.5, 0.7), frontX + 0.1, 0.25, d * 0.3);
+      put(box(mats.crate, 0.5, 0.5, 0.7), frontX + 0.1, 0.75, d * 0.3);
+    } else if (kind === 'masjid') {
+      height = 4.4;
+      put(box(mats.white, w, height, d), 0, height / 2);
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(Math.min(w, d) * 0.44, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+        mats.gold,
+      );
+      put(dome, 0, height);
+      put(new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 6.4, 8), mats.white), frontX - 0.4, 3.2, d * 0.34);
+      put(new THREE.Mesh(new THREE.ConeGeometry(0.44, 1.1, 8), mats.gold), frontX - 0.4, 6.95, d * 0.34);
+      put(box(mats.darkWood, 0.14, 2.1, 1.2), frontX, 1.05);
+    } else if (kind === 'sekolah') {
+      height = 6.6;
+      put(box(mats.white, w, height, d), 0, height / 2);
+      put(box(mats.metalRoof, w * 1.04, 0.18, d * 1.04), 0, height + 0.09);
+      for (let k = -1; k <= 1; k++) {
+        put(box(mats.glass, 0.12, 1.05, 0.9), frontX, 2.2, k * d * 0.26);
+        put(box(mats.glass, 0.12, 1.05, 0.9), frontX, 4.6, k * d * 0.26);
+      }
+      put(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 5.4, 6), mats.white), frontX - 0.35, 2.7, -d * 0.36);
+      put(box(mats.white, 0.05, 0.55, 0.9), frontX - 0.35, 5.2, -d * 0.36);
+    } else {
+      // gudang: dinding seng + pintu rol besar
+      height = 4.8 + rand() * 0.8;
+      put(box(mats.plaster[1], w, height, d), 0, height / 2);
+      const roof = box(mats.metalRoof, w * 1.12, 0.2, d * 1.06);
+      roof.rotation.z = -0.1;
+      put(roof, 0, height + 0.12);
+      put(box(mats.darkWood, 0.16, height * 0.62, w * 0.6), frontX, height * 0.31);
+      for (let k = 0; k < 4; k++) {
+        put(box(mats.metalRoof, 0.05, 0.06, w * 0.58), frontX + 0.06, height * 0.14 + k * height * 0.13);
+      }
+    }
+
+    this.scene.add(group);
+    // Tapak solid: kalau bangunan menghadap sumbu X, lebar/kedalaman tetap;
+    // kalau menghadap sumbu Z, keduanya bertukar.
+    const facingX = Math.abs(Math.sin(yaw)) > 0.7;
+    const hw = facingX ? w / 2 : d / 2;
+    const hd = facingX ? d / 2 : w / 2;
+    solid(x, z, hw, hd, height + 1.7);
+    return { kind, height };
   }
 
   /** Jendela gedung kota: SATU InstancedMesh berisi semua jendela, masing-masing
@@ -1177,6 +1469,21 @@ export class Scene3D {
       }
     }
 
+    // Pot bunga & tanaman kecil di depan ruko (detail kecil khas gang/pertokoan).
+    const pots = [];
+    for (const b of buildings) {
+      if (b.kind && b.kind !== 'ruko' && b.kind !== 'kantor') continue;
+      if (rand() > 0.45) continue;
+      const toCenter = Math.atan2(-b.x, -b.z);
+      const side = rand() > 0.5 ? 1 : -1;
+      pots.push({
+        x: b.x + Math.sin(toCenter) * (b.w / 2 + 0.28) + Math.cos(toCenter) * side * (b.d * 0.3),
+        z: b.z + Math.cos(toCenter) * (b.w / 2 + 0.28) - Math.sin(toCenter) * side * (b.d * 0.3),
+        color: ['#c2410c', '#a16207', '#cbd5e1'][Math.floor(rand() * 3)],
+        leaf: ['#2d993e', '#4db844', '#166534'][Math.floor(rand() * 3)],
+      });
+    }
+
     const instanced = (items, geo, mat, apply) => {
       if (!items.length) return null;
       const mesh = new THREE.InstancedMesh(geo, mat, items.length);
@@ -1245,6 +1552,32 @@ export class Scene3D {
     this.cityAwnings = awningMesh;
     this.cityAwningItems = awnings;
     this.awningSignature = '';
+
+    // pot bunga di depan toko
+    instanced(
+      pots,
+      new THREE.CylinderGeometry(0.26, 0.2, 0.42, 8),
+      new THREE.MeshStandardMaterial({ roughness: 0.85 }),
+      (p, d) => {
+        d.position.set(p.x, 0.21, p.z);
+        d.rotation.set(0, 0, 0);
+        d.scale.set(1, 1, 1);
+      },
+    );
+    const potMesh = group.children[group.children.length - 1];
+    if (potMesh?.isInstancedMesh) pots.forEach((p, i) => potMesh.setColorAt(i, new THREE.Color(p.color)));
+    instanced(
+      pots,
+      new THREE.SphereGeometry(0.3, 7, 6),
+      new THREE.MeshStandardMaterial({ roughness: 0.85 }),
+      (p, d) => {
+        d.position.set(p.x, 0.58, p.z);
+        d.rotation.set(0, 0, 0);
+        d.scale.set(1, 1, 1);
+      },
+    );
+    const potLeafMesh = group.children[group.children.length - 1];
+    if (potLeafMesh?.isInstancedMesh) pots.forEach((p, i) => potLeafMesh.setColorAt(i, new THREE.Color(p.leaf)));
 
     // antena TV
     instanced(
@@ -1361,6 +1694,11 @@ export class Scene3D {
             // keep the avenue grid clear so the streets stay visible
             if (Math.abs(bx - Math.round(bx / 37) * 37) < 7) continue;
             if (Math.abs(bz - Math.round(bz / 37) * 37) < 7) continue;
+            // koridor jalan kecil & gang di sekitar inti kota
+            if (Math.abs(Math.abs(bx) - 56.5) < 5.5) continue;
+            if (Math.abs(bz - 50.5) < 5.5) continue;
+            if (Math.abs(Math.abs(bx) - 45) < 3.2) continue;
+            if (Math.abs(bz - 46.8) < 3.2) continue;
             const t = Math.min(1, (r - band.min) / (band.max - band.min));
             const w = band.w[0] + rand() * (band.w[1] - band.w[0]);
             const d = band.w[0] + rand() * (band.w[1] - band.w[0]);

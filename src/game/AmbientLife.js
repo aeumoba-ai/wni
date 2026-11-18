@@ -22,6 +22,47 @@ import * as THREE from 'three';
      planters, umbul-umbul, parked motorcycles, halte, poskamling).
    ========================================================================== */
 
+/** Balon percakapan kecil di atas kepala warga (digambar di kanvas supaya
+    tidak bergantung pada font emoji perangkat). */
+function makeSpeechTexture(text, compact = false) {
+  const W = compact ? 96 : 128;
+  const H = compact ? 80 : 104;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const pad = 6;
+  const bubbleH = H - 22;
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = compact ? 4 : 5;
+  const r = 16;
+  ctx.beginPath();
+  ctx.moveTo(pad + r, pad);
+  ctx.lineTo(W - pad - r, pad);
+  ctx.quadraticCurveTo(W - pad, pad, W - pad, pad + r);
+  ctx.lineTo(W - pad, pad + bubbleH - r);
+  ctx.quadraticCurveTo(W - pad, pad + bubbleH, W - pad - r, pad + bubbleH);
+  ctx.lineTo(W * 0.58, pad + bubbleH);
+  ctx.lineTo(W * 0.42, H - pad);
+  ctx.lineTo(W * 0.4, pad + bubbleH);
+  ctx.lineTo(pad + r, pad + bubbleH);
+  ctx.quadraticCurveTo(pad, pad + bubbleH, pad, pad + bubbleH - r);
+  ctx.lineTo(pad, pad + r);
+  ctx.quadraticCurveTo(pad, pad, pad + r, pad);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#111827';
+  ctx.font = `800 ${compact ? 26 : 32}px "Plus Jakarta Sans", system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, W / 2, pad + bubbleH / 2 + 1);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 const ROAD_CENTER = 32;
 const ROAD_HALF_LEN = 62; // asphalt runs to ±68; keep wrap just inside it
 const ROAD_END = 68;
@@ -121,6 +162,7 @@ const ROLE_HOURS = {
   tukangparkir: [6, 22],
   nenek: [6, 18],
   remaja: [15, 24.5], // anak muda nongkrong sore–malam
+  kucing: [0, 24], // kucing kampung: kapan saja
   pembelikuliner: [16, 26.5], // pemburu kuliner malam
 };
 
@@ -135,7 +177,7 @@ export const PERIODS = {
     from: 4.5,
     to: 10,
     walkerScale: 1,
-    roles: { anaksekolah: 4, jogging: 3, tukangsayur: 2, penjualkoran: 2, petugas: 2, ibu: 2, warga: 2, pedagang: 2, tukangpos: 1, ojol: 1, kurir: 1, nenek: 1 },
+    roles: { anaksekolah: 4, kucing: 1, jogging: 3, tukangsayur: 2, penjualkoran: 2, petugas: 2, ibu: 2, warga: 2, pedagang: 2, tukangpos: 1, ojol: 1, kurir: 1, nenek: 1 },
   },
   siang: {
     key: 'siang',
@@ -143,7 +185,7 @@ export const PERIODS = {
     from: 10,
     to: 15.5,
     walkerScale: 1.15,
-    roles: { ibu: 3, kurir: 3, tukangbangunan: 3, nenek: 2, pedagang: 2, tukangparkir: 2, warga: 2, ojol: 2, anaksekolah: 2, tukangpos: 2, fotografer: 1, polisi: 1 },
+    roles: { ibu: 3, kucing: 1, kurir: 3, tukangbangunan: 3, nenek: 2, pedagang: 2, tukangparkir: 2, warga: 2, ojol: 2, anaksekolah: 2, tukangpos: 2, fotografer: 1, polisi: 1 },
   },
   sore: {
     key: 'sore',
@@ -151,7 +193,7 @@ export const PERIODS = {
     from: 15.5,
     to: 18.5,
     walkerScale: 1.3,
-    roles: { pembelikuliner: 3, remaja: 3, anak: 3, pasangan: 3, warga: 2, ibu: 2, ojol: 2, pengamen: 2, pedagang: 2, fotografer: 2, tukangparkir: 1, polisi: 1 },
+    roles: { pembelikuliner: 3, remaja: 3, kucing: 1, anak: 3, pasangan: 3, warga: 2, ibu: 2, ojol: 2, pengamen: 2, pedagang: 2, fotografer: 2, tukangparkir: 1, polisi: 1 },
   },
   malam: {
     key: 'malam',
@@ -159,7 +201,7 @@ export const PERIODS = {
     from: 18.5,
     to: 24,
     walkerScale: 0.85,
-    roles: { pembelikuliner: 3, remaja: 3, pasangan: 2, satpam: 3, ojol: 2, pengamen: 2, polisi: 1, pedagang: 1, warga: 1 },
+    roles: { pembelikuliner: 3, remaja: 3, kucing: 1, pasangan: 2, satpam: 3, ojol: 2, pengamen: 2, polisi: 1, pedagang: 1, warga: 1 },
   },
   dini: {
     key: 'dini',
@@ -167,7 +209,7 @@ export const PERIODS = {
     from: 0,
     to: 4.5,
     walkerScale: 0.45,
-    roles: { satpam: 4, ojol: 2, polisi: 1, petugas: 1, pembelikuliner: 1 },
+    roles: { satpam: 4, kucing: 1, ojol: 2, polisi: 1, petugas: 1, pembelikuliner: 1 },
   },
 };
 
@@ -245,10 +287,11 @@ const SKIN_TONES = ['#f2c39b', '#e0a678', '#c98a5b', '#a86b41'];
 /* ================================================================= class */
 
 export class AmbientLife {
-  constructor(scene, { compact = false, solids = null } = {}) {
+  constructor(scene, { compact = false, solids = null, roads = [] } = {}) {
     this.scene = scene;
     this.compact = compact;
     this.citySolids = Array.isArray(solids) ? solids : [];
+    this.extraRoads = Array.isArray(roads) ? roads : [];
     this.blockers = [];
     this.group = new THREE.Group();
     this.group.name = 'ambient-life';
@@ -278,6 +321,10 @@ export class AmbientLife {
     // Jam kota: mulai pagi, satu hari penuh dalam DAY_SECONDS detik nyata.
     this.hour = DAY_START_HOUR;
     this.periodKey = periodForHour(DAY_START_HOUR).key;
+    this.bubbles = [];
+    this.bubbleTextures = {};
+    this.interactTimer = 0;
+    this.chatCount = 0;
     this.dayLength = DAY_SECONDS;
     this.hourTick = -1;
     this.lights = { x: 'green', z: 'red' };
@@ -379,6 +426,13 @@ export class AmbientLife {
     // cream park footpath that rings the board
     if (Math.abs(ax - PARK_HALF) < 1.3 + r && az < 24) return true;
     if (Math.abs(az - PARK_HALF) < 1.3 + r && ax < 24) return true;
+    // jenjang jalan tambahan dari Scene3D: jalan lingkungan & gang sempit
+    for (const road of this.extraRoads) {
+      const along = road.fixed === 'x' ? z : x;
+      const across = road.fixed === 'x' ? ax : az;
+      if (along < road.from - r || along > road.to + r) continue;
+      if (Math.abs(across - Math.abs(road.at)) < road.half + r) return true;
+    }
     return false;
   }
 
@@ -629,6 +683,109 @@ export class AmbientLife {
     inSeason.forEach((s, i) => {
       s.targetScale = i < slots ? 1 : 0;
     });
+  }
+
+  /* --------------------------------------------------- INTERAKSI WARGA */
+
+  ensureBubbles() {
+    if (this.bubbles.length) return;
+    const words = ['Hai!', 'Halo', 'Mau?', 'Sedap', 'Beli?', 'Ngopi', 'Meong', 'Ayo!'];
+    this.bubbleTextures = {};
+    for (const word of words) this.bubbleTextures[word] = makeSpeechTexture(word, this.compact);
+    for (let i = 0; i < 10; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: this.bubbleTextures['Hai!'],
+        transparent: true,
+        depthWrite: false,
+        opacity: 0,
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(0.9, 0.72, 1);
+      sprite.visible = false;
+      this.group.add(sprite);
+      this.bubbles.push({ sprite, mat, life: 0, owner: null, offset: 0 });
+    }
+  }
+
+  /** Tampilkan balon percakapan di atas kepala warga. */
+  showBubble(walker, word, seconds = 2.2) {
+    this.ensureBubbles();
+    const slot = this.bubbles.find((b) => b.life <= 0) || this.bubbles[0];
+    slot.owner = walker;
+    slot.life = seconds;
+    slot.mat.map = this.bubbleTextures[word] || this.bubbleTextures['Hai!'];
+    slot.mat.needsUpdate = true;
+    slot.mat.opacity = 1;
+    slot.sprite.visible = true;
+    slot.offset = (this.rng() - 0.5) * 0.35;
+  }
+
+  updateBubbles(dt) {
+    for (const b of this.bubbles) {
+      if (b.life <= 0) {
+        if (b.sprite.visible) b.sprite.visible = false;
+        continue;
+      }
+      b.life -= dt;
+      const w = b.owner;
+      if (!w || !w.group.visible || b.life <= 0) {
+        b.life = 0;
+        b.sprite.visible = false;
+        continue;
+      }
+      const p = w.group.position;
+      const scale = Math.max(0.6, w.scale * (w.baseScale || 1));
+      b.sprite.position.set(p.x + b.offset, p.y + 1.5 * scale + 0.42, p.z);
+      b.sprite.scale.set(1.05 * scale, 0.85 * scale, 1);
+      b.mat.opacity = Math.min(1, b.life * 2.4);
+    }
+  }
+
+  /** Warga saling menyapa/mengobrol saat bertemu, dan mampir ke lapak yang buka.
+      Semua hanya mengubah waktu tunggu + balon percakapan, jadi posisi tetap
+      mengikuti jalur yang sudah bebas tabrakan. */
+  updateInteractions() {
+    const visible = this.walkers.filter((w) => w.group.visible && w.scale > 0.6 && w.role !== 'kucing');
+    for (let i = 0; i < visible.length; i++) {
+      const a = visible[i];
+      if (a.chatCooldown > this.time) continue;
+      for (let j = i + 1; j < visible.length; j++) {
+        const b = visible[j];
+        if (b.chatCooldown > this.time) continue;
+        const dx = b.group.position.x - a.group.position.x;
+        const dz = b.group.position.z - a.group.position.z;
+        if (dx * dx + dz * dz > 4.4) continue;
+        if (this.rng() > 0.5) continue;
+        const dur = between(this.rng, 2.2, 3.6);
+        a.wait = Math.max(a.wait, dur);
+        b.wait = Math.max(b.wait, dur);
+        a.chatWith = b;
+        b.chatWith = a;
+        a.chatCooldown = this.time + between(this.rng, 16, 30);
+        b.chatCooldown = this.time + between(this.rng, 16, 30);
+        this.showBubble(a, this.rng() > 0.5 ? 'Hai!' : 'Halo', 1.4);
+        this.showBubble(b, this.rng() > 0.5 ? 'Halo' : 'Ayo!', dur - 0.2);
+        this.chatCount += 1;
+        return;
+      }
+    }
+    // mampir beli di lapak yang sedang buka
+    const stalls = this.stalls.filter((s) => s.targetScale > 0.55 && s.scheduleOpen !== false);
+    if (!stalls.length) return;
+    for (const w of visible) {
+      if (w.chatCooldown > this.time || w.wait > 0) continue;
+      for (const s of stalls) {
+        const dx = s.group.position.x - w.group.position.x;
+        const dz = s.group.position.z - w.group.position.z;
+        if (dx * dx + dz * dz > 3.6) continue;
+        if (this.rng() > 0.45) continue;
+        const dur = between(this.rng, 2.6, 4.2);
+        w.wait = dur;
+        w.chatCooldown = this.time + between(this.rng, 22, 40);
+        this.showBubble(w, this.rng() > 0.5 ? 'Beli?' : 'Sedap', dur);
+        return;
+      }
+    }
   }
 
   /* ------------------------------------------------------------ JAM KOTA */
@@ -894,6 +1051,28 @@ export class AmbientLife {
         wire.scale.set(len, 0.045, 0.045);
         wire.position.set(top.x + len / 2, 5.66 + dy, (top.z + next.z) / 2);
         g.add(wire);
+      }
+    }
+
+    // Burung gereja bertengger di kabel listrik — detail kecil yang mudah
+    // dilewatkan pemain, tapi bikin jalan terasa hidup.
+    const birdMat = this.mat('#4b5563', { roughness: 0.85 });
+    const birdBeakMat = this.mat('#f59e0b', { roughness: 0.7 });
+    for (const top of poleTops) {
+      const next = poleTops.find((o) => o !== top && o.sz === top.sz && Math.abs(o.x - top.x - 24) < 1.5);
+      if (!next) continue;
+      for (let b = 0; b < 3; b++) {
+        const t = 0.22 + b * 0.26 + this.rng() * 0.08;
+        const bx = top.x + (next.x - top.x) * t;
+        const bz = top.z + (next.z - top.z) * t + (this.rng() - 0.5) * 0.2;
+        const bird = new THREE.Group();
+        this.box(bird, '', 0.2, 0.13, 0.13, 0, 0, 0, { material: birdMat });
+        this.sphere(bird, '', 0.075, 0.11, 0.04, 0, { material: birdMat, lowPoly: true, noShadow: true });
+        this.box(bird, '', 0.06, 0.03, 0.03, 0.18, 0.03, 0, { material: birdBeakMat, noShadow: true });
+        bird.position.set(bx, 5.72, bz);
+        bird.rotation.y = this.rng() * Math.PI * 2;
+        g.add(bird);
+        this.addAnim('bob', bird, { baseY: 5.72, amp: 0.02, speed: 2.4 + this.rng() * 1.6, phase: this.rng() * 6 });
       }
     }
 
@@ -1626,6 +1805,7 @@ export class AmbientLife {
       'anaksekolah',
       'remaja',
       'pembelikuliner',
+      'kucing',
     ];
     // Shuffle the pool with the match seed, then keep only part of it, so every
     // match shows its own mix of professions (some appear twice, others not at
@@ -1764,6 +1944,7 @@ export class AmbientLife {
   }
 
   buildPerson(role, rand) {
+    if (role === 'kucing') return this.buildCat(rand);
     const g = new THREE.Group();
     const legs = [];
     const skin = pick(rand, SKIN_TONES);
@@ -1970,6 +2151,25 @@ export class AmbientLife {
     }
 
     return { group: g, legs, scale };
+  }
+
+  /** Kucing kampung: badan kecil, kuping segitiga, ekor yang bergoyang.
+      Dipakai lewat sistem warga supaya tetap bebas tabrakan. */
+  buildCat(rand) {
+    const g = new THREE.Group();
+    const coats = ['#f59e0b', '#9ca3af', '#1f2937', '#f8fafc', '#d97706'];
+    const coat = coats[Math.floor(rand() * coats.length) % coats.length];
+    this.box(g, coat, 0.52, 0.24, 0.26, 0, 0.26, 0);
+    const head = this.sphere(g, coat, 0.13, 0.3, 0.34, 0, { lowPoly: true });
+    head.scale.multiplyScalar(1.05);
+    this.cone(g, coat, 0.1, 0.11, 0.3, 0.45, 0.07);
+    this.cone(g, coat, 0.1, 0.11, 0.3, 0.45, -0.07);
+    this.box(g, '#f8fafc', 0.08, 0.06, 0.06, 0.38, 0.35, 0);
+    for (const [lx, lz] of [[-0.18, 0.08], [-0.18, -0.08], [0.18, 0.08], [0.18, -0.08]]) {
+      this.box(g, coat, 0.07, 0.16, 0.07, lx, 0.08, lz);
+    }
+    const tail = this.box(g, coat, 0.07, 0.07, 0.34, -0.3, 0.34, 0);
+    return { group: g, legs: [tail], scale: 0.72 };
   }
 
   /* ================================================================ STALLS */
@@ -2411,6 +2611,14 @@ export class AmbientLife {
       }
 
       const pos = w.patrol ? this.patrolPosition(w) : ringPosition(w.half, w.t, w.lateral);
+      // saat mengobrol, badan menghadap lawan bicara
+      if (w.chatWith && w.wait > 0) {
+        const px = w.chatWith.group.position.x - pos.x;
+        const pz = w.chatWith.group.position.z - pos.z;
+        pos.rot = Math.atan2(px, pz);
+      } else if (w.chatWith) {
+        w.chatWith = null;
+      }
       const groundY = Math.abs(pos.x) > PARK_HALF + 1 || Math.abs(pos.z) > PARK_HALF + 1 ? 0.1 : 0.09;
       const bobY = walking ? Math.abs(Math.sin(bob * 7 + w.bobPhase)) * 0.045 : 0;
       w.group.position.set(pos.x, groundY + bobY, pos.z);
@@ -2430,7 +2638,15 @@ export class AmbientLife {
       }
 
       if (w.pause <= 0 && this.rng() < 0.0009) w.pause = between(this.rng, 1.4, 3.6);
+      if (w.role === 'kucing' && this.rng() < 0.0006) this.showBubble(w, 'Meong', 1.6);
     }
+
+    this.interactTimer -= dt;
+    if (this.interactTimer <= 0) {
+      this.interactTimer = 0.55;
+      this.updateInteractions();
+    }
+    this.updateBubbles(dt);
 
     // ---- keep pedestrians a shoulder apart -------------------------------
     // Walkers that meet head-on on the same stretch can drift into each other
@@ -2520,6 +2736,13 @@ export class AmbientLife {
         case 'flicker': {
           const f = 0.6 + Math.abs(Math.sin(this.time * (anim.speed || 5))) * 0.5;
           mesh.material.emissiveIntensity = 0.4 + f * 0.4;
+          break;
+        }
+        case 'bob': {
+          // burung di kabel: goyang kecil, sesekali "membungkuk"
+          const k = Math.sin(this.time * (anim.speed || 2.5) + (anim.phase || 0));
+          mesh.position.y = (anim.baseY || 0) + k * (anim.amp || 0.02);
+          mesh.rotation.z = k * 0.12;
           break;
         }
         default:
