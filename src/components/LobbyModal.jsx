@@ -11,9 +11,9 @@ import {
   Settings,
   SlidersHorizontal,
   ChevronRight,
+  ChevronDown,
   Volume2,
   Clapperboard,
-  BookOpen,
   Monitor,
   Grid3X3,
 } from 'lucide-react';
@@ -43,6 +43,8 @@ export default function LobbyModal({
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [isPrivate, setIsPrivate] = useState(true);
   const [createPassword, setCreatePassword] = useState('');
+  // Keeps the main menu compact: the optional password field only appears when needed.
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
 
   const [joinCode, setJoinCode] = useState(initialInviteCode || '');
   const [joinPassword, setJoinPassword] = useState('');
@@ -142,7 +144,7 @@ export default function LobbyModal({
           <h1 className="game-logo" style={{ margin: 0 }}>MONOPOLI NEGERI KONOHA</h1>
         </div>
         <p className="lobby-subtitle">
-          Main online bareng teman atau orang asing. Setiap pemain mulai dengan Rp15.000.000.
+          Guest-only · tanpa login · modal awal Rp15.000.000
         </p>
 
         {/* SATU-SATUNYA TOMBOL PENGATURAN DI MENU UTAMA: semua pengaturan ada di sini */}
@@ -161,9 +163,6 @@ export default function LobbyModal({
               <Settings size={15} />
               PENGATURAN
             </span>
-            <span className="main-settings-sub">
-              Semua pengaturan ada di sini — suara, animasi &amp; cutscene, info ruangan, cara main
-            </span>
             <span className="main-settings-chips">
               <span className="main-settings-chip">
                 <Volume2 size={11} /> Suara {audioMaster}%
@@ -171,14 +170,13 @@ export default function LobbyModal({
               <span className={`main-settings-chip ${smoothAnimation ? 'on' : ''}`}>
                 <Clapperboard size={11} /> Animasi {smoothAnimation ? 'ON' : 'OFF'}
               </span>
-              <span className={`main-settings-chip ${visualStyle === 'pixel' ? 'on' : ''}`}>
-                <Grid3X3 size={11} /> {visualStyle === 'pixel' ? 'GAYA PIXEL' : 'GAYA BIASA'}
-              </span>
+              {visualStyle === 'pixel' && (
+                <span className="main-settings-chip on">
+                  <Grid3X3 size={11} /> GAYA PIXEL
+                </span>
+              )}
               <span className="main-settings-chip">
                 <Monitor size={11} /> Grafik {graphicsPreset === 'high' ? 'TINGGI' : graphicsPreset === 'low' ? 'RINGAN' : graphicsPreset === 'custom' ? 'KUSTOM' : 'SEIMBANG'}
-              </span>
-              <span className="main-settings-chip">
-                <BookOpen size={11} /> Cara Main
               </span>
             </span>
           </span>
@@ -294,7 +292,6 @@ export default function LobbyModal({
                   </button>
                 ))}
               </div>
-              <div className="field-hint">Kursi kosong bisa diisi bot di lobi.</div>
             </div>
 
             <div className="visibility-row">
@@ -317,15 +314,31 @@ export default function LobbyModal({
             </div>
 
             <div className="field-block">
-              <label className="field-label">Password (opsional)</label>
-              <input
-                type="text"
-                className="kraft-input"
-                maxLength={24}
-                value={createPassword}
-                onChange={(e) => setCreatePassword(e.target.value)}
-                placeholder="Kosongkan kalau tanpa password"
-              />
+              <button
+                type="button"
+                className={`lobby-advanced-toggle ${showCreatePassword ? 'on' : ''}`}
+                onClick={() => {
+                  const next = !showCreatePassword;
+                  setShowCreatePassword(next);
+                  if (!next) setCreatePassword('');
+                }}
+                aria-expanded={showCreatePassword}
+              >
+                <Lock size={12} />
+                <span>{showCreatePassword ? 'Password ruangan aktif' : 'Pakai password (opsional)'}</span>
+                <ChevronDown size={14} className="lobby-advanced-chev" />
+              </button>
+              {showCreatePassword && (
+                <input
+                  type="password"
+                  className="kraft-input lobby-password-input"
+                  maxLength={24}
+                  value={createPassword}
+                  onChange={(e) => setCreatePassword(e.target.value)}
+                  placeholder="Ketik password ruangan…"
+                  autoComplete="new-password"
+                />
+              )}
             </div>
 
             <button type="submit" className="btn-green full-width" disabled={busy}>
