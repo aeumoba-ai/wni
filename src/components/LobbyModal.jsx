@@ -16,6 +16,7 @@ import {
   Clapperboard,
   Monitor,
   Grid3X3,
+  Sparkles,
 } from 'lucide-react';
 import { CHARACTERS, RANDOM_GUEST_NAMES, getCharacterById } from '../../shared/characters.js';
 import AvatarIcon from './AvatarIcon.jsx';
@@ -31,6 +32,8 @@ export default function LobbyModal({
   onPreviewRoom,
   onListPublicRooms,
   onOpenSettings,
+  onOpenCustomizer,
+  customization = null,
   smoothAnimation = false,
   audioMaster = 0,
   graphicsPreset = 'balanced',
@@ -231,6 +234,16 @@ export default function LobbyModal({
           <div className="pion-quote">
             {selectedChar.name}: &ldquo;{selectedChar.quote}&rdquo;
           </div>
+          <button type="button" className="pion-custom-btn" onClick={() => onOpenCustomizer?.()}>
+            <span className="pion-custom-avatar">
+              <AvatarIcon characterId={characterId} customization={customization} size={34} />
+            </span>
+            <span>
+              <strong>KUSTOMISASI KARAKTER</strong>
+              <small>Kulit, rambut, baju adat &amp; kaos, aksesori</small>
+            </span>
+            <Sparkles size={16} />
+          </button>
         </div>
 
         {/* Segmented Tabs: BUAT | KODE | CARI */}

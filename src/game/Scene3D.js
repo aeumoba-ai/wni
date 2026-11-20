@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BOARD_TILES, DEFAULT_BOARD_SEED, TOTAL_TILES, JAIL_TILE_ID, formatShortRupiah } from '../../shared/boardData.js';
 import { getCharacterById } from '../../shared/characters.js';
+import { normalizeCustomization, resolveLook } from '../../shared/customization.js';
 import { AmbientLife } from './AmbientLife.js';
 import { soundEngine } from './SoundEngine.js';
 import { buildTileLandmark, buildUpgradeStructure } from './Landmarks3D.js';
@@ -1409,6 +1410,7 @@ export class Scene3D {
     this.cityDetails = group;
     const dummy = new THREE.Object3D();
     const rand = seededRandom(778899);
+    const decor = Math.max(0.4, Math.min(1.6, this.graphics?.decor ?? 1));
     const tankColors = ['#f97316', '#e2e8f0', '#cbd5e1', '#38bdf8', '#facc15'];
     const awningColors = ['#dc2626', '#0ea5e9', '#16a34a', '#f59e0b', '#7c3aed', '#f8fafc'];
 
@@ -1421,7 +1423,7 @@ export class Scene3D {
     for (const b of buildings) {
       const toCenter = Math.atan2(-b.x, -b.z); // arah menghadap taman
       // tandon air di atap
-      if (rand() > 0.22) {
+      if (rand() < 0.22 + decor * 0.35) {
         tanks.push({
           x: b.x + (rand() - 0.5) * b.w * 0.45,
           y: b.h + 0.62,
@@ -1431,7 +1433,7 @@ export class Scene3D {
         });
       }
       // AC/ kondensor di atap & di fasad
-      const roofUnits = rand() > 0.5 ? 2 : 1;
+      const roofUnits = rand() < decor * 0.45 ? 2 : 1;
       for (let k = 0; k < roofUnits; k++) {
         roofAc.push({
           x: b.x + (rand() - 0.5) * b.w * 0.7,
@@ -1440,7 +1442,8 @@ export class Scene3D {
           yaw: rand() > 0.5 ? 0 : Math.PI / 2,
         });
       }
-      for (let k = 0; k < 2; k++) {
+      const wallUnits = decor > 1.05 ? 3 : 2;
+      for (let k = 0; k < wallUnits; k++) {
         const level = 0.35 + rand() * 0.45;
         const push = Math.max(b.w, b.d) / 2;
         wallAc.push({
@@ -1460,7 +1463,7 @@ export class Scene3D {
         color: awningColors[Math.floor(rand() * awningColors.length)],
       });
       // antena TV
-      if (rand() > 0.62) {
+      if (rand() < decor * 0.45) {
         antennas.push({
           x: b.x + (rand() - 0.5) * b.w * 0.5,
           y: b.h + 1.35,
@@ -1473,7 +1476,7 @@ export class Scene3D {
     const pots = [];
     for (const b of buildings) {
       if (b.kind && b.kind !== 'ruko' && b.kind !== 'kantor') continue;
-      if (rand() > 0.45) continue;
+      if (rand() > 0.25 + decor * 0.3) continue;
       const toCenter = Math.atan2(-b.x, -b.z);
       const side = rand() > 0.5 ? 1 : -1;
       pots.push({
@@ -2178,8 +2181,237 @@ export class Scene3D {
     });
   }
 
-  createPawnMesh(characterId, isCurrent = false) {
+  // Rias pion sesuai kustomisasi pemain (kulit, rambut, penutup kepala, atasan,
+  // bawahan, alas kaki, aksesori). Semua mesh opsional, tidak pernah melempar
+  // error kalaupun id katalog tidak dikenal (look sudah dinormalisasi).
+  buildPawnLook(group, look) {
+    const mat = (color, roughness = 0.6) => new THREE.MeshStandardMaterial({ color, roughness });
+    const add = (geo, material, x, y, z, rot) => {
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.position.set(x, y, z);
+      if (rot) mesh.rotation.set(rot[0] || 0, rot[1] || 0, rot[2] || 0);
+      group.add(mesh);
+      return mesh;
+    };
+
+    /* ---------------- Penutup kepala (dipakai juga oleh rambut) ---------------- */
+    const hw = look.headwear || { shape: 'none' };
+    const hwColor = look.headwearColor?.color || '#1a1a1a';
+    const hwMat = mat(hwColor, 0.55);
+    const shape = hw.shape || 'none';
+    // Bandana/band tetap di atas rambut; topi & kerudung menutupi ubun-ubun.
+    const covered = shape !== 'none' && shape !== 'band' && shape !== 'band_feather';
+
+    /* ---------------- Rambut ---------------- */
+    const hairColor = look.hairColor?.color || '#14100f';
+    const hairMat = mat(hairColor, 0.72);
+    const hairShape = look.hairStyle?.shape || 'short';
+    // Cangkang rambut hanya menutup ubun-ubun supaya mata tetap terlihat.
+    const skull = (radius, y, length = 0.42) => {
+      if (covered) return null;
+      return add(new THREE.SphereGeometry(radius, 22, 14, 0, Math.PI * 2, 0, Math.PI * length), hairMat, 0, y, 0);
+    };
+
+    if (hairShape === 'short') skull(0.52, 1.78, 0.42);
+    else if (hairShape === 'buzz') skull(0.508, 1.79, 0.36);
+    else if (hairShape === 'side') {
+      skull(0.53, 1.78, 0.46);
+      if (!covered) add(new THREE.BoxGeometry(0.44, 0.13, 0.08), hairMat, 0, 1.95, 0.4);
+    } else if (hairShape === 'curly') {
+      skull(0.52, 1.79, 0.42);
+      if (!covered) for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2;
+        add(new THREE.SphereGeometry(0.17, 8, 8), hairMat, Math.cos(a) * 0.36, 2.02, Math.sin(a) * 0.36);
+      }
+    } else if (hairShape === 'afro') {
+      if (!covered) {
+        add(new THREE.SphereGeometry(0.64, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat, 0, 1.88, -0.04);
+        add(new THREE.SphereGeometry(0.6, 16, 12, 0, Math.PI * 2, Math.PI * 0.34, Math.PI * 0.28), hairMat, 0, 1.92, -0.2);
+      }
+    } else if (hairShape === 'long') {
+      skull(0.53, 1.78, 0.44);
+      add(new THREE.BoxGeometry(0.84, 0.66, 0.24), hairMat, 0, 1.44, -0.3);
+    } else if (hairShape === 'wave') {
+      skull(0.53, 1.78, 0.44);
+      add(new THREE.BoxGeometry(0.8, 0.42, 0.22), hairMat, 0, 1.52, -0.32);
+      add(new THREE.SphereGeometry(0.2, 10, 8), hairMat, 0.34, 1.32, -0.28);
+      add(new THREE.SphereGeometry(0.2, 10, 8), hairMat, -0.34, 1.32, -0.28);
+    } else if (hairShape === 'ponytail') {
+      skull(0.53, 1.78, 0.42);
+      add(new THREE.CylinderGeometry(0.13, 0.06, 0.52, 8), hairMat, 0, 1.5, -0.5, [0.5, 0, 0]);
+    } else if (hairShape === 'bun') {
+      skull(0.53, 1.78, 0.44);
+      add(new THREE.SphereGeometry(0.22, 10, 10), hairMat, 0, 2.24, -0.16);
+    } else if (hairShape === 'bangs') {
+      skull(0.53, 1.80, 0.4);
+      if (!covered) add(new THREE.BoxGeometry(0.5, 0.16, 0.1), hairMat, 0, 1.96, 0.42);
+    } else if (hairShape === 'mohawk') {
+      if (!covered) {
+        add(new THREE.BoxGeometry(0.12, 0.3, 0.72), hairMat, 0, 2.2, 0);
+        add(new THREE.SphereGeometry(0.5, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.34), hairMat, 0, 1.82, 0);
+      }
+    }
+    // 'bald' → tidak ada rambut
+
+    /* ---------------- Penutup kepala ---------------- */
+    if (shape === 'peci') {
+      add(new THREE.CylinderGeometry(0.46, 0.48, 0.34, 14), hwMat, 0, 2.08, 0);
+      if (hw.trim) add(new THREE.TorusGeometry(0.45, 0.028, 6, 16), mat('#d4a017', 0.4), 0, 2.05, 0, [Math.PI / 2, 0, 0]);
+    } else if (shape === 'songkok') {
+      add(new THREE.CylinderGeometry(0.47, 0.5, 0.44, 14), hwMat, 0, 2.1, 0);
+    } else if (shape === 'blangkon') {
+      add(new THREE.SphereGeometry(0.58, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.45), hwMat, 0, 1.81, -0.02);
+      add(new THREE.SphereGeometry(0.2, 10, 8), hwMat, 0, 2.0, -0.42);
+    } else if (shape === 'band') {
+      add(new THREE.TorusGeometry(0.5, 0.075, 7, 18), hwMat, 0, 1.94, 0, [Math.PI / 2, 0, 0]);
+    } else if (shape === 'band_feather') {
+      add(new THREE.TorusGeometry(0.5, 0.08, 7, 18), hwMat, 0, 1.94, 0, [Math.PI / 2, 0, 0]);
+      add(new THREE.ConeGeometry(0.07, 0.4, 6), mat('#f97316', 0.6), 0.1, 2.16, -0.44, [-0.4, 0, 0.2]);
+      add(new THREE.ConeGeometry(0.06, 0.32, 6), mat('#111827', 0.6), -0.12, 2.1, -0.44, [-0.4, 0, -0.2]);
+    } else if (shape === 'udeng') {
+      add(new THREE.SphereGeometry(0.58, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.45), hwMat, 0, 1.8, 0);
+      add(new THREE.BoxGeometry(0.24, 0.17, 0.17), hwMat, 0, 2.08, 0.34, [0.35, 0, 0.2]);
+    } else if (shape === 'cone') {
+      add(new THREE.ConeGeometry(0.95, 0.5, 14), hwMat, 0, 2.24, 0);
+    } else if (shape === 'veil') {
+      add(new THREE.SphereGeometry(0.6, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.4), hwMat, 0, 1.76, -0.02);
+      add(new THREE.SphereGeometry(0.17, 12, 12), hwMat, -0.47, 1.58, -0.06).scale.set(0.55, 1.75, 1.15);
+      add(new THREE.SphereGeometry(0.17, 12, 12), hwMat, 0.47, 1.58, -0.06).scale.set(0.55, 1.75, 1.15);
+      add(new THREE.CylinderGeometry(0.5, 0.62, 0.5, 14), hwMat, 0, 1.06, 0);
+    } else if (shape === 'veil_long') {
+      add(new THREE.SphereGeometry(0.6, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.4), hwMat, 0, 1.76, -0.02);
+      add(new THREE.SphereGeometry(0.17, 12, 12), hwMat, -0.47, 1.5, -0.06).scale.set(0.55, 2.1, 1.15);
+      add(new THREE.SphereGeometry(0.17, 12, 12), hwMat, 0.47, 1.5, -0.06).scale.set(0.55, 2.1, 1.15);
+      add(new THREE.CylinderGeometry(0.5, 0.7, 1.04, 14), hwMat, 0, 0.8, 0);
+    } else if (shape === 'wide_brim') {
+      add(new THREE.CylinderGeometry(0.86, 0.9, 0.055, 18), hwMat, 0, 1.98, 0);
+      add(new THREE.SphereGeometry(0.51, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.44), hwMat, 0, 1.76, 0);
+    } else if (shape === 'cap') {
+      add(new THREE.SphereGeometry(0.54, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.44), hwMat, 0, 1.77, 0);
+      add(new THREE.BoxGeometry(0.6, 0.07, 0.36), hwMat, 0, 1.84, 0.34);
+    } else if (shape === 'cowboy') {
+      add(new THREE.CylinderGeometry(0.82, 0.88, 0.07, 18), hwMat, 0, 1.98, 0);
+      add(new THREE.CylinderGeometry(0.44, 0.5, 0.34, 14), hwMat, 0, 2.14, 0);
+      add(new THREE.TorusGeometry(0.48, 0.03, 6, 16), mat('#7c2d12', 0.6), 0, 2.02, 0, [Math.PI / 2, 0, 0]);
+    } else if (shape === 'beanie') {
+      add(new THREE.SphereGeometry(0.575, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.44), hwMat, 0, 1.79, 0);
+      add(new THREE.SphereGeometry(0.12, 8, 8), hwMat, 0, 2.22, 0);
+    } else if (shape === 'helmet') {
+      add(new THREE.SphereGeometry(0.56, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.46), hwMat, 0, 1.83, 0);
+      if (hw.visor) add(new THREE.BoxGeometry(0.66, 0.15, 0.25), mat('#111827', 0.4), 0, 1.84, 0.46);
+    } else if (shape === 'helmet_full') {
+      add(new THREE.SphereGeometry(0.6, 14, 12, 0, Math.PI * 2, 0, Math.PI * 0.72), hwMat, 0, 1.72, 0);
+      add(new THREE.BoxGeometry(0.72, 0.24, 0.16), mat('#0f172a', 0.25), 0, 1.66, 0.48);
+    } else if (shape === 'crown') {
+      add(new THREE.CylinderGeometry(0.44, 0.46, 0.2, 12), mat('#d4a017', 0.35), 0, 2.18, 0);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        add(new THREE.ConeGeometry(0.07, 0.24, 5), mat('#fbbf24', 0.3), Math.cos(a) * 0.36, 2.36, Math.sin(a) * 0.36);
+      }
+    }
+
+    /* ---------------- Motif atasan ---------------- */
+    const accent = look.top?.accent || '#ffffff';
+    const accentMat = mat(accent, 0.55);
+    const pattern = look.top?.pattern || 'plain';
+    if (pattern === 'collar' || pattern === 'batik') {
+      add(new THREE.TorusGeometry(0.25, 0.045, 6, 14), accentMat, 0, 1.3, 0, [Math.PI / 2, 0, 0]);
+    }
+    if (pattern === 'batik') {
+      [0.7, 0.88, 1.06].forEach((y, i) => {
+        add(new THREE.CylinderGeometry(0.4 - i * 0.02, 0.42 - i * 0.02, 0.05, 12), accentMat, 0, y, 0);
+      });
+      [1.24, 1.06, 0.88].forEach((y) => {
+        add(new THREE.SphereGeometry(0.045, 6, 6), accentMat, 0, y, 0.4);
+      });
+    } else if (pattern === 'stripes') {
+      [0.72, 0.94, 1.16].forEach((y, i) => {
+        add(new THREE.CylinderGeometry(0.405 - i * 0.02, 0.42 - i * 0.02, 0.09, 12), accentMat, 0, y, 0);
+      });
+    } else if (pattern === 'sash') {
+      add(new THREE.BoxGeometry(0.28, 0.9, 0.12), accentMat, 0, 0.94, 0.36, [0, 0, 0.42]);
+    }
+
+    /* ---------------- Alas kaki ---------------- */
+    const shoes = look.shoes;
+    if (shoes?.color) {
+      [-0.16, 0.16].forEach((lx) => {
+        add(new THREE.BoxGeometry(0.25, 0.12, 0.34), mat(shoes.color, 0.6), lx, 0.28, 0.04);
+        add(new THREE.BoxGeometry(0.27, 0.05, 0.36), mat(shoes.sole || '#111827', 0.7), lx, 0.21, 0.04);
+      });
+    }
+
+    /* ---------------- Aksesori ---------------- */
+    const has = (id) => Boolean(look.hasAccessory && look.hasAccessory(id));
+    const dark = mat('#111827', 0.45);
+    const gold = mat('#d4a017', 0.4);
+
+    if (has('kacamata') || has('kacamata_hitam') || has('kacamata_bulat')) {
+      const r = has('kacamata_bulat') ? 0.15 : 0.13;
+      [-0.16, 0.16].forEach((gx) => {
+        add(new THREE.TorusGeometry(r, 0.028, 6, 14), dark, gx, 1.68, 0.47);
+        if (has('kacamata_hitam')) {
+          add(new THREE.CircleGeometry(r - 0.01, 14), mat('#0b1220', 0.2), gx, 1.68, 0.472);
+        }
+      });
+      add(new THREE.BoxGeometry(0.1, 0.022, 0.022), dark, 0, 1.68, 0.47);
+      add(new THREE.BoxGeometry(0.16, 0.022, 0.022), dark, -0.32, 1.7, 0.42, [0, 0.5, 0]);
+      add(new THREE.BoxGeometry(0.16, 0.022, 0.022), dark, 0.32, 1.7, 0.42, [0, -0.5, 0]);
+    }
+    if (has('masker')) {
+      add(new THREE.BoxGeometry(0.52, 0.3, 0.08), mat('#e5e7eb', 0.8), 0, 1.5, 0.44);
+      add(new THREE.BoxGeometry(0.54, 0.05, 0.06), mat('#cbd5e1', 0.8), 0, 1.62, 0.44);
+    }
+    if (has('kumis')) add(new THREE.BoxGeometry(0.3, 0.07, 0.07), dark, 0, 1.56, 0.47);
+    if (has('jenggot')) add(new THREE.SphereGeometry(0.3, 10, 8, 0, Math.PI, Math.PI * 0.35, Math.PI * 0.4), mat('#1f2937', 0.75), 0, 1.5, 0.16);
+    if (has('anting')) {
+      [-0.49, 0.49].forEach((ax) => add(new THREE.SphereGeometry(0.05, 8, 8), gold, ax, 1.52, 0.06));
+    }
+    if (has('tindik_hidung')) add(new THREE.SphereGeometry(0.04, 6, 6), gold, 0.06, 1.6, 0.49);
+    if (has('kalung')) add(new THREE.TorusGeometry(0.26, 0.035, 6, 16), gold, 0, 1.34, 0, [Math.PI / 2.1, 0, 0]);
+    if (has('syal')) {
+      add(new THREE.TorusGeometry(0.3, 0.09, 7, 16), mat('#b91c1c', 0.8), 0, 1.36, 0, [Math.PI / 2, 0, 0]);
+      add(new THREE.BoxGeometry(0.16, 0.5, 0.08), mat('#b91c1c', 0.8), 0.16, 1.08, 0.34);
+    }
+    if (has('selendang')) {
+      add(new THREE.TorusGeometry(0.28, 0.05, 6, 16), mat('#f59e0b', 0.7), 0, 1.36, 0, [Math.PI / 2, 0, 0]);
+      add(new THREE.BoxGeometry(0.2, 0.72, 0.06), mat('#f59e0b', 0.7), -0.14, 0.96, 0.36, [0, 0, 0.12]);
+    }
+    if (has('dasi')) {
+      add(new THREE.BoxGeometry(0.12, 0.1, 0.08), mat('#111827', 0.5), 0, 1.26, 0.4);
+      add(new THREE.BoxGeometry(0.12, 0.42, 0.07), mat('#111827', 0.5), 0, 1.0, 0.4);
+    }
+    if (has('tas_ransel')) {
+      add(new THREE.BoxGeometry(0.52, 0.5, 0.24), mat('#334155', 0.75), 0, 1.0, -0.36);
+      [-0.2, 0.2].forEach((sx) => add(new THREE.BoxGeometry(0.06, 0.5, 0.06), mat('#1f2937', 0.75), sx, 1.2, 0.02));
+    }
+    if (has('tas_belanja')) {
+      add(new THREE.BoxGeometry(0.3, 0.32, 0.2), mat('#f59e0b', 0.8), 0.62, 0.66, 0.04);
+      add(new THREE.TorusGeometry(0.1, 0.02, 5, 10), mat('#78350f', 0.7), 0.62, 0.86, 0.04);
+    }
+    if (has('buku')) {
+      add(new THREE.BoxGeometry(0.26, 0.3, 0.06), mat('#f8fafc', 0.7), 0.6, 1.1, 0.16);
+      add(new THREE.BoxGeometry(0.26, 0.3, 0.02), mat('#1e3a8a', 0.6), 0.6, 1.1, 0.2);
+    }
+    if (has('kipas')) {
+      add(new THREE.CircleGeometry(0.22, 14), mat('#fcd34d', 0.7), 0.62, 1.2, 0.22, [0, -0.5, 0]);
+      add(new THREE.BoxGeometry(0.04, 0.22, 0.03), mat('#92400e', 0.7), 0.56, 1.02, 0.2);
+    }
+    if (has('mikrofon')) {
+      add(new THREE.CylinderGeometry(0.035, 0.045, 0.26, 8), mat('#111827', 0.5), 0.58, 1.16, 0.22);
+      add(new THREE.SphereGeometry(0.08, 10, 8), mat('#4b5563', 0.4), 0.58, 1.32, 0.22);
+    }
+    if (has('payung')) {
+      add(new THREE.CylinderGeometry(0.028, 0.028, 1.5, 8), mat('#475569', 0.6), 0.58, 1.55, 0.1);
+      add(new THREE.ConeGeometry(0.72, 0.36, 14), mat('#0ea5e9', 0.6), 0.58, 2.34, 0.1);
+    }
+    if (has('jam_tangan')) add(new THREE.TorusGeometry(0.1, 0.025, 6, 12), mat('#111827', 0.4), -0.5, 0.78, 0.04, [0, 0, Math.PI / 2]);
+    if (has('gelang')) add(new THREE.TorusGeometry(0.1, 0.03, 6, 12), gold, 0.5, 0.78, 0.04, [0, 0, Math.PI / 2]);
+  }
+
+  createPawnMesh(characterId, isCurrent = false, customization = null) {
     const char = getCharacterById(characterId);
+    const look = customization ? resolveLook(customization) : null;
     const group = new THREE.Group();
 
     // Thick glossy colored base pad (exact look of red & teal circular discs in gameplay-3.jpg!)
@@ -2197,15 +2429,23 @@ export class Scene3D {
     group.add(baseRim, baseTop);
 
     // Cute stubby legs
-    const legMat = new THREE.MeshStandardMaterial({ color: '#27272a', roughness: 0.7 });
+    const legMat = new THREE.MeshStandardMaterial({ color: look ? look.bottom.color : '#27272a', roughness: 0.7 });
     [-0.16, 0.16].forEach((lx) => {
       const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.36, 8), legMat);
       leg.position.set(lx, 0.42, 0);
       group.add(leg);
+      if (look?.bottom?.stripe) {
+        const stripe = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.115, 0.115, 0.055, 8),
+          new THREE.MeshStandardMaterial({ color: look.bottom.stripe, roughness: 0.6 })
+        );
+        stripe.position.set(lx, 0.52, 0);
+        group.add(stripe);
+      }
     });
 
     // Chibi torso + cute little arms
-    const shirtMat = new THREE.MeshStandardMaterial({ color: char.shirtColor, roughness: 0.6 });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: look ? look.top.color : char.shirtColor, roughness: 0.6 });
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.78, 12), shirtMat);
     body.position.y = 0.92;
     body.castShadow = true;
@@ -2221,7 +2461,7 @@ export class Scene3D {
     // Big adorable chibi head
     const head = new THREE.Mesh(
       new THREE.SphereGeometry(0.5, 16, 14),
-      new THREE.MeshStandardMaterial({ color: char.skinColor, roughness: 0.55 })
+      new THREE.MeshStandardMaterial({ color: look ? look.skin.base : char.skinColor, roughness: 0.55 })
     );
     head.position.y = 1.66;
     head.castShadow = true;
@@ -2235,9 +2475,11 @@ export class Scene3D {
       group.add(eye);
     });
 
-    // Character-specific Indonesian headgear
+    // Character-specific Indonesian headgear / look kustom pemain
     const hatMat = new THREE.MeshStandardMaterial({ color: char.hatColor, roughness: 0.5 });
-    if (char.hatType === 'peaked_cap') {
+    if (look) {
+      this.buildPawnLook(group, look);
+    } else if (char.hatType === 'peaked_cap') {
       const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.48, 0.3, 14), hatMat);
       crown.position.y = 2.12;
       const brim = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.09, 0.38), new THREE.MeshStandardMaterial({ color: '#1f2937' }));
@@ -2873,6 +3115,25 @@ export class Scene3D {
     this.orbit.desiredPhi = 0.72;
   }
 
+  /** Look kustom milik pemain lokal (pionnya sendiri saja). */
+  setPlayerCustomization(playerId, customization) {
+    const normalized = customization ? normalizeCustomization(customization) : null;
+    const key = normalized ? JSON.stringify(normalized) : 'none';
+    const samePlayer = this.localPlayerId === (playerId || null);
+    if (samePlayer && this.playerLookKey === key) return;
+    this.localPlayerId = playerId || null;
+    this.playerCustomization = normalized;
+    this.playerLookKey = key;
+    // Pion lama dibuang supaya dibangun ulang dengan tampilan baru.
+    if (playerId) {
+      const pawn = this.pawns.get(playerId);
+      if (pawn) {
+        this.scene.remove(pawn.group);
+        this.pawns.delete(playerId);
+      }
+    }
+  }
+
   syncGameState(game) {
     this.lastGame = game;
     if (!game) {
@@ -2961,7 +3222,8 @@ export class Scene3D {
       const isCurrent = game.currentPlayerId === pl.id && !pl.bankrupt;
 
       if (!pawn) {
-        const built = this.createPawnMesh(pl.characterId, isCurrent);
+        const customLook = this.localPlayerId && pl.id === this.localPlayerId ? this.playerCustomization : null;
+        const built = this.createPawnMesh(pl.characterId, isCurrent, customLook);
         if (this.pixelStyle) this.applyPixelMaterialTone(built.group); // pion & karakter ikut pixel
         this.scene.add(built.group);
         const initPos = tileWorldPos(pl.position, R_MID);

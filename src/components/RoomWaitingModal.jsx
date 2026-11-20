@@ -16,6 +16,7 @@ import {
   Globe,
   Wifi,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 import { CHARACTERS, getCharacterById } from '../../shared/characters.js';
 import AvatarIcon from './AvatarIcon.jsx';
@@ -32,6 +33,8 @@ export default function RoomWaitingModal({
   onLeaveRoom,
   onSendChat,
   onOpenSettings,
+  onOpenCustomizer,
+  customization = null,
   error,
 }) {
   const [copiedCode, setCopiedCode] = useState(false);
@@ -167,7 +170,7 @@ export default function RoomWaitingModal({
                 const isMe = p.id === myId;
                 return (
                   <div key={p.id} className={`seat-row ${isMe ? 'me' : ''}`}>
-                    <AvatarIcon characterId={p.characterId} size={38} />
+                    <AvatarIcon characterId={p.characterId} customization={isMe ? customization : null} size={38} />
                     <div className="seat-info">
                       <div className="seat-name">
                         <span>{p.name}</span>
@@ -189,6 +192,16 @@ export default function RoomWaitingModal({
                           onClick={() => setShowPionPicker((v) => !v)}
                         >
                           Ganti Pion
+                        </button>
+                      )}
+                      {isMe && (
+                        <button
+                          type="button"
+                          className="btn-small-tan custom-look-btn"
+                          onClick={() => onOpenCustomizer?.()}
+                          title="Atur kulit, rambut, baju, dan aksesori karakter"
+                        >
+                          <Sparkles size={13} /> Kustomisasi
                         </button>
                       )}
                       {isHost && !p.isHost && (

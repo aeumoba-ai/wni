@@ -15,6 +15,8 @@ import PortoModal from './components/PortoModal.jsx';
 import TradeModal, { IncomingTradeModal } from './components/TradeModal.jsx';
 import { ChatDrawer, LogDrawer } from './components/SideDrawers.jsx';
 import CutsceneOverlay from './components/CutsceneOverlay.jsx';
+import CharacterCustomizerModal from './components/CharacterCustomizerModal.jsx';
+import { CUSTOMIZATION_STORAGE_KEY, normalizeCustomization } from '../shared/customization.js';
 import { DEFAULT_GRAPHICS_SETTINGS, GRAPHICS_STORAGE_KEY, loadGraphicsSettings, normalizeGraphicsSettings } from './game/GraphicsSettings.js';
 
 const SMOOTH_ANIM_STORAGE_KEY = 'monopoli_konoha_smooth_anim_v1';
@@ -50,6 +52,14 @@ export default function App() {
   const [guestId] = useState(getOrCreateGuestId);
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('konoha_guest_name') || 'Miko');
   const [characterId, setCharacterId] = useState(() => localStorage.getItem('konoha_guest_char') || 'ojol');
+  const [customization, setCustomization] = useState(() => {
+    try {
+      return normalizeCustomization(JSON.parse(localStorage.getItem(CUSTOMIZATION_STORAGE_KEY) || 'null'));
+    } catch {
+      return normalizeCustomization(null);
+    }
+  });
+  const [showCustomizer, setShowCustomizer] = useState(false);
   const [initialInviteCode] = useState(getInviteCodeFromUrl);
 
   const [room, setRoom] = useState(null);
@@ -161,6 +171,15 @@ export default function App() {
     setGraphicsSettings((current) => normalizeGraphicsSettings({ ...current, visualStyle }));
   }, []);
 
+  // Ganti perangkat (PC / Android): preset & batas detail ikut menyesuaikan.
+  const handleSetGraphicsPlatform = useCallback((platform) => {
+    setGraphicsSettings((current) => {
+      const nextPlatform = platform === 'android' ? 'android' : 'pc';
+      const preset = nextPlatform === 'android' ? 'android' : 'balanced';
+      return normalizeGraphicsSettings({ ...current, platform: nextPlatform, preset });
+    });
+  }, []);
+
   const handleUpdateGraphicsCustom = useCallback((patch) => {
     setGraphicsSettings((current) =>
       normalizeGraphicsSettings({ ...current, preset: 'custom', custom: { ...current.custom, ...patch } })
@@ -229,6 +248,16 @@ export default function App() {
     sceneRef.current?.setSmoothAnimation(smoothAnimation);
   }, [smoothAnimation]);
 
+  // Look kustom pemain: tersimpan di perangkat & langsung dipakai pion sendiri.
+  useEffect(() => {
+    sceneRef.current?.setPlayerCustomization(guestId, customization);
+    try {
+      localStorage.setItem(CUSTOMIZATION_STORAGE_KEY, JSON.stringify(customization));
+    } catch {
+      // Abaikan bila penyimpanan diblokir (mode privat).
+    }
+  }, [guestId, customization]);
+
   // Graphics apply locally only (not synchronized across players), and persist per device.
   useEffect(() => {
     sceneRef.current?.setGraphicsSettings(graphicsSettings);
@@ -243,6 +272,7 @@ export default function App() {
   useEffect(() => {
     const sc = sceneRef.current;
     if (!sc) return;
+    sc.setPlayerCustomization(guestId, customization);
     if (room?.status === 'playing' && room.game) {
       sc.setMode('game');
       sc.syncGameState(room.game);
@@ -250,7 +280,7 @@ export default function App() {
       sc.setMode('lobby');
       sc.syncGameState(null);
     }
-  }, [room]);
+  }, [room, guestId, customization]);
 
   // Initialize Vercel-Ready PeerJS + BroadcastChannel RoomClient
   useEffect(() => {
@@ -459,6 +489,8 @@ export default function App() {
           onPreviewRoom={handlePreviewRoom}
           onListPublicRooms={handleListPublicRooms}
           onOpenSettings={() => setShowSettings(true)}
+          onOpenCustomizer={() => setShowCustomizer(true)}
+          customization={customization}
           smoothAnimation={smoothAnimation}
           audioMaster={audioSettings.muted ? 0 : audioSettings.master}
         graphicsPreset={graphicsSettings.preset}
@@ -493,6 +525,8 @@ export default function App() {
           onLeaveRoom={handleLeaveRoom}
           onSendChat={(text) => emitAction('send_chat', { text })}
           onOpenSettings={() => setShowSettings(true)}
+          onOpenCustomizer={() => setShowCustomizer(true)}
+          customization={customization}
           error={error}
         />
       )}
@@ -517,6 +551,8 @@ export default function App() {
               setShowLog((v) => !v);
             }}
             onOpenSettings={() => setShowSettings(true)}
+            onOpenCustomizer={() => setShowCustomizer(true)}
+            customization={customization}
             onOpenPorto={() => setShowPorto(true)}
             onOpenTrade={() => setShowTrade(true)}
             onRollDice={(mode) => emitAction('game_roll', { mode })}
@@ -650,6 +686,7 @@ export default function App() {
         graphicsSettings={graphicsSettings}
         onSetVisualStyle={handleSetVisualStyle}
         onSetGraphicsPreset={handleSetGraphicsPreset}
+        onSetGraphicsPlatform={handleSetGraphicsPlatform}
         onUpdateGraphicsCustom={handleUpdateGraphicsCustom}
         onResetGraphics={handleResetGraphics}
         onUpdateVolume={handleUpdateVolume}
@@ -658,8 +695,22 @@ export default function App() {
         onApplyPreset={handleApplyAudioPreset}
         onResetAudio={handleResetAudio}
         onOpenHowToPlay={() => setShowHowToPlay(true)}
+        onOpenCustomizer={() => {
+          setShowSettings(false);
+          setShowCustomizer(true);
+        }}
+        customization={customization}
+        characterId={characterId}
         onLeaveRoom={handleLeaveRoom}
         onClose={() => setShowSettings(false)}
+      />
+
+      <CharacterCustomizerModal
+        open={showCustomizer}
+        customization={customization}
+        characterId={characterId}
+        onChange={setCustomization}
+        onClose={() => setShowCustomizer(false)}
       />
 
       {smoothAnimation && (

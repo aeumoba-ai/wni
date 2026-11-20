@@ -12,6 +12,7 @@ import {
   Camera,
   KeyRound,
   ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 import { formatRupiah, formatShortRupiah, JAIL_BAIL_AMOUNT } from '../../shared/boardData.js';
 import { getCharacterById } from '../../shared/characters.js';
@@ -28,6 +29,8 @@ export default function GameHUD({
   onOpenChat,
   onOpenLog,
   onOpenSettings,
+  onOpenCustomizer,
+  customization = null,
   onOpenPorto,
   onOpenTrade,
   onRollDice,
@@ -146,7 +149,7 @@ export default function GameHUD({
                   }}
                 >
                   <div className="hud-avatar-wrap">
-                    <AvatarIcon characterId={pl.characterId} size={36} />
+                    <AvatarIcon characterId={pl.characterId} customization={pl.id === myId ? customization : null} size={36} />
                     <span className="hud-seat-badge" style={{ background: char.color }}>
                       {idx === 0 ? <Crown size={10} /> : idx + 1}
                     </span>
@@ -208,6 +211,14 @@ export default function GameHUD({
             </button>
             <button className="hud-circle-btn" onClick={onResetCamera} title="Reset Kamera">
               <Camera size={17} />
+            </button>
+            <button
+              className="hud-circle-btn hud-custom-btn"
+              onClick={onOpenCustomizer}
+              title="KUSTOMISASI KARAKTER — warna kulit, rambut, baju adat/kaos, aksesori"
+              aria-label="Buka Kustomisasi Karakter"
+            >
+              <Sparkles size={17} />
             </button>
             <button
               className="hud-circle-btn hud-settings-btn"

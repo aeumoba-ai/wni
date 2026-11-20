@@ -24,9 +24,13 @@ import {
   Gauge,
   Smartphone,
   Zap,
+  Users,
+  Trees,
 } from 'lucide-react';
 import { soundEngine } from '../game/SoundEngine.js';
-import { GRAPHICS_PRESETS, getEffectiveGraphicsSettings } from '../game/GraphicsSettings.js';
+import { GRAPHICS_PRESETS, PLATFORM_DETAIL_LIMITS, getEffectiveGraphicsSettings } from '../game/GraphicsSettings.js';
+import AvatarIcon from './AvatarIcon.jsx';
+import { describeCustomization, resolveLook } from '../../shared/customization.js';
 
 function VolumeSliderRow({
   icon,
@@ -88,6 +92,10 @@ export default function SettingsModal({
   graphicsSettings,
   onSetVisualStyle,
   onSetGraphicsPreset,
+  onSetGraphicsPlatform,
+  onOpenCustomizer,
+  customization = null,
+  characterId = 'ojol',
   onUpdateGraphicsCustom,
   onResetGraphics,
   onUpdateVolume,
@@ -132,6 +140,14 @@ export default function SettingsModal({
   const showAnimTab = currentTab === 'anim';
   const showGraphicsTab = currentTab === 'graphics';
   const effectiveGraphics = getEffectiveGraphicsSettings(graphicsSettings);
+  const lookSummary = describeCustomization(customization);
+  const lookResolved = resolveLook(customization);
+  const platformKey = graphicsSettings?.platform === 'android' ? 'android' : 'pc';
+  const platformLimits = PLATFORM_DETAIL_LIMITS[platformKey];
+  const slider = (key) => {
+    const range = platformLimits[key] || [0.5, 1.5];
+    return { min: Math.round(range[0] * 100), max: Math.round(range[1] * 100) };
+  };
 
   const copyText = async (text, setter) => {
     try {
@@ -512,6 +528,22 @@ export default function SettingsModal({
           {/* TAB 4: GAME GRAPHICS PRESETS + OPTIONAL ADVANCED CUSTOMIZATION */}
           {showGraphicsTab && (
             <div className="settings-graphics-panel">
+              <div className="settings-look-card">
+                <AvatarIcon characterId={characterId} customization={customization} size={52} />
+                <div className="settings-look-meta">
+                  <div className="settings-look-title">KARAKTER SAYA</div>
+                  <div className="settings-look-desc">{lookSummary}</div>
+                  <div className="settings-look-tags">
+                    <span>{lookResolved.headwear.label}</span>
+                    <span>{lookResolved.top.label}</span>
+                    <span>{lookResolved.accessories.length} aksesori</span>
+                  </div>
+                </div>
+                <button type="button" className="settings-look-btn" onClick={() => onOpenCustomizer?.()}>
+                  <Sparkles size={15} /> KUSTOMISASI
+                </button>
+              </div>
+
               <div className="graphics-intro-card">
                 <div className="graphics-intro-icon"><Monitor size={19} /></div>
                 <div>
@@ -626,47 +658,110 @@ export default function SettingsModal({
                 </button>
               </div>
 
-              {graphicsSettings?.preset === 'custom' && (
-                <div className="graphics-custom-box">
-                  <div className="graphics-custom-heading">
-                    <div>
-                      <div className="smooth-features-title"><SlidersHorizontal size={15} /> ADVANCED OPTION · GRAFIK KUSTOM</div>
-                      <div className="settings-desc">Kustomisasi bersifat opsional dan langsung diterapkan. Skala perangkat mobile otomatis dibatasi agar tidak terlalu berat.</div>
+              {/* DETAIL GRAFIK — bisa diatur terpisah untuk PC dan Android */}
+              <div className="graphics-detail-panel">
+                <div className="graphics-custom-heading">
+                  <div>
+                    <div className="smooth-features-title">
+                      <SlidersHorizontal size={15} /> DETAIL GRAFIK · {platformLimits.label}
                     </div>
-                    <button type="button" className="settings-mini-toggle" onClick={onResetGraphics} title="Kembalikan pengaturan grafik seimbang">Reset</button>
+                    <div className="settings-desc">{platformLimits.note}</div>
                   </div>
-
-                  <div className="graphics-custom-sliders">
-                    <label className="graphics-slider-row">
-                      <span><span className="graphics-slider-label"><Monitor size={14} /> Resolusi render</span><strong>{Math.round(effectiveGraphics.resolution * 100)}%</strong></span>
-                      <input type="range" min="65" max="200" step="5" value={Math.round(effectiveGraphics.resolution * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ resolution: Number(e.target.value) / 100 })} />
-                      <small>Kejernihan 3D / pixel ratio. Lebih tinggi memakai GPU lebih banyak.</small>
-                    </label>
-                    <label className="graphics-slider-row">
-                      <span><span className="graphics-slider-label"><Sparkles size={14} /> Kepadatan efek</span><strong>{Math.round(effectiveGraphics.effects * 100)}%</strong></span>
-                      <input type="range" min="25" max="250" step="5" value={Math.round(effectiveGraphics.effects * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ effects: Number(e.target.value) / 100 })} />
-                      <small>Jumlah koin, konfeti, kilau, dan partikel pada momen animasi.</small>
-                    </label>
-                    <label className="graphics-slider-row">
-                      <span><span className="graphics-slider-label"><Building2 size={14} /> Tinggi bangunan</span><strong>{Math.round(effectiveGraphics.buildingHeight * 100)}%</strong></span>
-                      <input type="range" min="85" max="180" step="5" value={Math.round(effectiveGraphics.buildingHeight * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ buildingHeight: Number(e.target.value) / 100 })} />
-                      <small>Ruko, gedung dan menara landmark upgrade jadi lebih menjulang.</small>
-                    </label>
-                    <label className="graphics-slider-row">
-                      <span><span className="graphics-slider-label"><Sun size={14} /> Detail dekorasi</span><strong>{Math.round(effectiveGraphics.detail * 100)}%</strong></span>
-                      <input type="range" min="50" max="180" step="5" value={Math.round(effectiveGraphics.detail * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ detail: Number(e.target.value) / 100 })} />
-                      <small>Kaca fasad, lis atap, detail ornamen, dan geometri partikel.</small>
-                    </label>
-                  </div>
-
-                  <label className="graphics-shadow-toggle">
-                    <span className="graphics-shadow-icon"><Sun size={16} /></span>
-                    <span><strong>Bayangan 3D lembut</strong><small>Bayangan bangunan dan objek pada papan/kota.</small></span>
-                    <input type="checkbox" checked={Boolean(effectiveGraphics.shadows)} onChange={(e) => onUpdateGraphicsCustom?.({ shadows: e.target.checked })} />
-                  </label>
-                  <div className="graphics-mobile-note">Di HP, resolusi puncak tetap dibatasi otomatis berdasarkan ukuran layar untuk membantu menjaga performa dan suhu perangkat.</div>
+                  <button type="button" className="settings-mini-toggle" onClick={onResetGraphics} title="Kembalikan pengaturan grafik seimbang">
+                    Reset
+                  </button>
                 </div>
-              )}
+
+                <div className="graphics-platform-toggle">
+                  <button
+                    type="button"
+                    className={`graphics-platform-pill ${platformKey === 'pc' ? 'active' : ''}`}
+                    onClick={() => onSetGraphicsPlatform?.('pc')}
+                    aria-pressed={platformKey === 'pc'}
+                  >
+                    <Monitor size={15} /> PC / LAPTOP
+                  </button>
+                  <button
+                    type="button"
+                    className={`graphics-platform-pill ${platformKey === 'android' ? 'active' : ''}`}
+                    onClick={() => onSetGraphicsPlatform?.('android')}
+                    aria-pressed={platformKey === 'android'}
+                  >
+                    <Smartphone size={15} /> ANDROID / HP
+                  </button>
+                </div>
+
+                <div className="graphics-custom-sliders">
+                  <label className="graphics-slider-row">
+                    <span>
+                      <span className="graphics-slider-label"><Monitor size={14} /> Resolusi render</span>
+                      <strong>{Math.round(effectiveGraphics.resolution * 100)}%</strong>
+                    </span>
+                    <input type="range" {...slider('resolution')} step="5" value={Math.round(effectiveGraphics.resolution * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ resolution: Number(e.target.value) / 100 })} />
+                    <small>Kejernihan 3D. Naikkan untuk gambar lebih tajam, turunkan kalau terasa berat.</small>
+                  </label>
+
+                  <label className="graphics-slider-row">
+                    <span>
+                      <span className="graphics-slider-label"><Building2 size={14} /> Detail bangunan &amp; ornamen</span>
+                      <strong>{Math.round(effectiveGraphics.detail * 100)}%</strong>
+                    </span>
+                    <input type="range" {...slider('detail')} step="5" value={Math.round(effectiveGraphics.detail * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ detail: Number(e.target.value) / 100 })} />
+                    <small>Fasad, jendela, tandon, AC, kanopi, dan detail kecil kota.</small>
+                  </label>
+
+                  <label className="graphics-slider-row">
+                    <span>
+                      <span className="graphics-slider-label"><Users size={14} /> Keramaian warga</span>
+                      <strong>{Math.round((effectiveGraphics.crowd ?? 1) * 100)}%</strong>
+                    </span>
+                    <input type="range" {...slider('crowd')} step="5" value={Math.round((effectiveGraphics.crowd ?? 1) * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ crowd: Number(e.target.value) / 100 })} />
+                    <small>Jumlah pejalan kaki, kendaraan, dan lapak yang aktif.</small>
+                  </label>
+
+                  <label className="graphics-slider-row">
+                    <span>
+                      <span className="graphics-slider-label"><Trees size={14} /> Perabot kota</span>
+                      <strong>{Math.round((effectiveGraphics.decor ?? 1) * 100)}%</strong>
+                    </span>
+                    <input type="range" {...slider('decor')} step="5" value={Math.round((effectiveGraphics.decor ?? 1) * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ decor: Number(e.target.value) / 100 })} />
+                    <small>Pohon, pot bunga, jemuran gang, bangku, dan dekorasi jalan.</small>
+                  </label>
+
+                  <label className="graphics-slider-row">
+                    <span>
+                      <span className="graphics-slider-label"><Sparkles size={14} /> Kepadatan efek</span>
+                      <strong>{Math.round(effectiveGraphics.effects * 100)}%</strong>
+                    </span>
+                    <input type="range" {...slider('effects')} step="5" value={Math.round(effectiveGraphics.effects * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ effects: Number(e.target.value) / 100 })} />
+                    <small>Koin, konfeti, kilau, dan partikel pada momen animasi.</small>
+                  </label>
+
+                  <label className="graphics-slider-row">
+                    <span>
+                      <span className="graphics-slider-label"><Building2 size={14} /> Tinggi bangunan</span>
+                      <strong>{Math.round(effectiveGraphics.buildingHeight * 100)}%</strong>
+                    </span>
+                    <input type="range" {...slider('buildingHeight')} step="5" value={Math.round(effectiveGraphics.buildingHeight * 100)} onChange={(e) => onUpdateGraphicsCustom?.({ buildingHeight: Number(e.target.value) / 100 })} />
+                    <small>Ruko, gedung, dan menara landmark jadi lebih menjulang.</small>
+                  </label>
+                </div>
+
+                <label className="graphics-shadow-toggle">
+                  <span className="graphics-shadow-icon"><Sun size={16} /></span>
+                  <span>
+                    <strong>Bayangan 3D lembut</strong>
+                    <small>Bayangan bangunan dan objek pada papan/kota.</small>
+                  </span>
+                  <input type="checkbox" checked={Boolean(effectiveGraphics.shadows)} onChange={(e) => onUpdateGraphicsCustom?.({ shadows: e.target.checked })} />
+                </label>
+
+                <div className="graphics-mobile-note">
+                  {platformKey === 'android'
+                    ? 'Mode Android: bayangan diperbarui 15×/detik, lampu titik dimatikan, dan resolusi turun otomatis (maksimal 25%) hanya bila FPS menurun — gambar tetap tajam.'
+                    : 'Mode PC: semua slider terbuka penuh. Slider di atas langsung mengubah preset menjadi KUSTOM.'}
+                </div>
+              </div>
 
               <div className="graphics-quality-note">
                 <ShieldCheck size={14} /> Grafik hanya mengubah tampilan lokal — tidak memengaruhi aturan, keadilan, atau sinkronisasi multiplayer.

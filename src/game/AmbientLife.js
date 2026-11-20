@@ -523,6 +523,9 @@ export class AmbientLife {
   setQuality(graphics) {
     const detail = graphics?.detail ?? 1;
     const effects = graphics?.effects ?? 1;
+    // Keramaian warga (slider "Keramaian") — hanya mengubah jumlah, bukan
+    // membangun ulang kota, jadi aman digeser sambil bermain.
+    this.crowdScale = Math.max(0.35, Math.min(1.7, graphics?.crowd ?? 1));
     const next = Math.max(0.55, Math.min(1.4, 0.72 * detail * 0.5 + 0.55 * effects));
     const key = Math.round(next * 4) / 4;
     if (key === this._qualityKey) return;
@@ -605,11 +608,12 @@ export class AmbientLife {
     this.propsVersion = (this.propsVersion || 0) + 1;
     const q = this.quality;
     const period = periodForHour(this.hour);
+    const crowd = this.crowdScale ?? 1;
     const budget = {
-      vehicles: Math.max(2, Math.round(this.currentLevel.vehicles * q)),
+      vehicles: Math.max(2, Math.round(this.currentLevel.vehicles * q * crowd)),
       // jam kota ikut menentukan keramaian: sore paling ramai, dini hari sepi
-      walkers: Math.max(3, Math.round(this.currentLevel.walkers * q * period.walkerScale)),
-      stalls: Math.max(1, Math.round(this.currentLevel.stalls * q)),
+      walkers: Math.max(3, Math.round(this.currentLevel.walkers * q * period.walkerScale * crowd)),
+      stalls: Math.max(1, Math.round(this.currentLevel.stalls * q * Math.min(1.4, crowd))),
     };
     this.budget = budget;
 
